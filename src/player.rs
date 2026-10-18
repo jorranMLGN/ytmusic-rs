@@ -24,6 +24,15 @@ impl std::fmt::Display for SignInRequired {
 
 impl std::error::Error for SignInRequired {}
 
+/// Which of the signed-in client's streams to take.
+#[derive(Clone, Copy, Debug)]
+enum Choice {
+    /// Exactly this itag, as when a stream already playing needs a fresh url.
+    Itag(u32),
+    /// The best stream at or below this many bits per second, as [`choose`] picks it.
+    Within(Option<u32>),
+}
+
 #[derive(Clone, Debug)]
 pub struct Playability {
     pub status: String,
@@ -79,7 +88,7 @@ impl YtMusic {
     /// proof-of-origin token. That path works for a guest too, so a run without an account
     /// still gets the second try.
     pub async fn best_audio(&self, video_id: &str) -> Result<AudioFormat> {
-        let refused = match self.guest_audio(video_id).await {
+        let refused = match self.guest_audio(video_id, None).await {
             Ok(format) => match self.serves(&format).await {
                 true => return Ok(format),
                 false => anyhow::anyhow!("the stream host refused the guest url"),
@@ -87,22 +96,46 @@ impl YtMusic {
             Err(error) => error,
         };
         log::debug!("player: the guest stream for {video_id} failed ({refused:#})");
-        self.signed_audio(video_id)
+        self.signed_audio(video_id, None)
             .await
             .with_context(|| format!("the guest stream failed too ({refused:#})"))
     }
 
-    /// The stream to play `video_id` from, already arriving.
+    /// The best stream to play `video_id` from, already arriving, chosen as
+    /// [`open_audio_within`](Self::open_audio_within) chooses with no ceiling.
     ///
-    /// The same order as [`best_audio`](Self::best_audio), guest first and signed second, but
-    /// the first range of the body is what checks the url rather than a probe of its own, so
-    /// a track that plays costs no round trip beyond the download. The stream holds the client
-    /// weakly, so a url the host stops serving partway through can be renewed.
+    /// Unlike [`best_audio`](Self::best_audio), the first range of the body is what checks the
+    /// url rather than a probe of its own, so a track that plays costs no round trip beyond the
+    /// download. The stream holds the client weakly, so a url the host stops serving partway
+    /// through can be renewed.
     pub async fn open_audio(
         self: &Arc<Self>,
         video_id: &str,
     ) -> Result<(AudioFormat, AudioStream)> {
-        let refused = match self.guest_audio(video_id).await {
+        self.open_audio_within(video_id, None).await
+    }
+
+    /// The stream to play `video_id` from, already arriving, at no more than `ceiling` bits
+    /// per second. A track whose every stream is above the ceiling plays its lowest one.
+    ///
+    /// `None` takes the best there is. For a signed-in session that asks the signed-in client
+    /// first, since the guest client stops at 128 kbps and only the signed-in one offers a
+    /// Premium account its 256 kbps stream. A failure there falls back to the guest client.
+    pub async fn open_audio_within(
+        self: &Arc<Self>,
+        video_id: &str,
+        ceiling: Option<u32>,
+    ) -> Result<(AudioFormat, AudioStream)> {
+        let signed_first = ceiling.is_none() && self.is_cookie_auth();
+        if signed_first {
+            match self.open_signed(video_id, None).await {
+                Ok(opened) => return Ok(opened),
+                Err(error) => {
+                    log::debug!("player: the signed stream for {video_id} failed ({error:#})")
+                }
+            }
+        }
+        let refused = match self.guest_audio(video_id, ceiling).await {
             Ok(format) => match AudioStream::open(self.http.clone(), &format).await {
                 Ok(stream) => {
                     let stream = stream.renewing(self, video_id, format.itag);
@@ -112,11 +145,22 @@ impl YtMusic {
             },
             Err(error) => error,
         };
+        if signed_first {
+            return Err(refused.context("the signed stream failed too"));
+        }
         log::debug!("player: the guest stream for {video_id} failed ({refused:#})");
-        let format = self
-            .signed_audio(video_id)
+        self.open_signed(video_id, ceiling)
             .await
-            .with_context(|| format!("the guest stream failed too ({refused:#})"))?;
+            .with_context(|| format!("the guest stream failed too ({refused:#})"))
+    }
+
+    /// The signed-in client's stream for `video_id` within `ceiling`, already arriving.
+    async fn open_signed(
+        self: &Arc<Self>,
+        video_id: &str,
+        ceiling: Option<u32>,
+    ) -> Result<(AudioFormat, AudioStream)> {
+        let format = self.signed_audio(video_id, ceiling).await?;
         let stream = AudioStream::open(self.http.clone(), &format).await?;
         let stream = stream.renewing(self, video_id, format.itag);
         Ok((format, stream))
@@ -138,7 +182,8 @@ impl YtMusic {
             .await_minted(&binding)
             .await
             .context("no proof-of-origin token was minted in time")?;
-        self.signed_format(video_id, &token, Some(itag)).await
+        self.signed_format(video_id, &token, Choice::Itag(itag))
+            .await
     }
 
     /// Whether the stream host will serve this url, asked with the smallest range there is.
@@ -167,27 +212,34 @@ impl YtMusic {
         Ok((format, data))
     }
 
-    async fn guest_audio(&self, video_id: &str) -> Result<AudioFormat> {
+    async fn guest_audio(&self, video_id: &str, ceiling: Option<u32>) -> Result<AudioFormat> {
         let response = self.guest_player(video_id).await?;
-        let audio = playable(&response, video_id)?
+        let audio: Vec<AudioFormat> = playable(&response, video_id)?
             .iter()
             .filter_map(|format| audio_format(format, Client::VisionOs))
             .collect();
-        pick(audio).with_context(|| format!("no direct audio stream for {video_id}"))
+        log::debug!(
+            "player: {} offers {video_id} as {}",
+            Client::VisionOs.name(),
+            offered(audio.iter().map(|format| (format.itag, format.bitrate)))
+        );
+        choose(audio, ceiling, |format| (&format.mime, format.bitrate))
+            .with_context(|| format!("no direct audio stream for {video_id}"))
     }
 
-    async fn signed_audio(&self, video_id: &str) -> Result<AudioFormat> {
+    async fn signed_audio(&self, video_id: &str, ceiling: Option<u32>) -> Result<AudioFormat> {
         let token = self.po_token().await;
-        self.signed_format(video_id, &token, None).await
+        self.signed_format(video_id, &token, Choice::Within(ceiling))
+            .await
     }
 
     /// The signed-in client's stream for `video_id`, with `token` on both the player request and
-    /// the url. Takes `itag` when one is given and the best AAC stream otherwise.
+    /// the url, chosen as `choice` says.
     async fn signed_format(
         &self,
         video_id: &str,
         token: &str,
-        itag: Option<u32>,
+        choice: Choice,
     ) -> Result<AudioFormat> {
         let solver = self.solver().await?;
         log::debug!(
@@ -210,18 +262,24 @@ impl YtMusic {
             },
         });
         let response = self.execute("player", Client::Music, payload).await?;
-        let mut audio: Vec<Ciphered> = playable(&response, video_id)?
+        let audio: Vec<Ciphered> = playable(&response, video_id)?
             .iter()
             .filter_map(ciphered)
             .collect();
-        audio.sort_by_key(|format| std::cmp::Reverse(format.bitrate));
-        let chosen = match itag {
-            Some(itag) => audio
+        log::debug!(
+            "player: {} offers {video_id} as {}",
+            Client::Music.name(),
+            offered(audio.iter().map(|format| (format.itag, format.bitrate)))
+        );
+        let chosen = match choice {
+            Choice::Itag(itag) => audio
                 .into_iter()
                 .find(|format| format.itag == itag)
                 .with_context(|| format!("itag {itag} is no longer offered for {video_id}"))?,
-            None => prefer_aac(audio)
-                .with_context(|| format!("no addressable audio stream for {video_id}"))?,
+            Choice::Within(ceiling) => {
+                choose(audio, ceiling, |format| (&format.mime, format.bitrate))
+                    .with_context(|| format!("no addressable audio stream for {video_id}"))?
+            }
         };
         let url = decipher(&solver, &chosen).await?;
         Ok(AudioFormat {
@@ -461,17 +519,6 @@ fn set_params(url: &mut reqwest::Url, changes: &[(&str, &str)]) {
     query.finish();
 }
 
-fn prefer_aac(formats: Vec<Ciphered>) -> Option<Ciphered> {
-    let aac = formats
-        .iter()
-        .position(|format| format.mime.starts_with("audio/mp4"));
-    let mut formats = formats;
-    match aac {
-        Some(at) => Some(formats.swap_remove(at)),
-        None => formats.into_iter().next(),
-    }
-}
-
 fn playable<'a>(response: &'a Value, video_id: &str) -> Result<&'a Vec<Value>> {
     let playability = playability(response);
     if !playability.ok() {
@@ -511,13 +558,31 @@ fn describe(format: &AudioFormat, bytes: usize) -> String {
     )
 }
 
-fn pick(formats: Vec<AudioFormat>) -> Option<AudioFormat> {
+/// The stream to play out of `formats`, read through `key` as its mime type and bitrate. AAC
+/// wins over every other codec when there is any. Among the candidates it takes the highest
+/// bitrate at or below `ceiling`, or the lowest of them when all are above it, and simply the
+/// highest when there is no ceiling.
+fn choose<T>(formats: Vec<T>, ceiling: Option<u32>, key: impl Fn(&T) -> (&str, u32)) -> Option<T> {
     let aac = formats
         .iter()
-        .filter(|format| format.mime.starts_with("audio/mp4"))
-        .max_by_key(|format| format.bitrate)
-        .cloned();
-    aac.or_else(|| formats.into_iter().max_by_key(|format| format.bitrate))
+        .any(|format| key(format).0.starts_with("audio/mp4"));
+    let candidates = formats
+        .into_iter()
+        .filter(|format| !aac || key(format).0.starts_with("audio/mp4"));
+    let (within, above): (Vec<T>, Vec<T>) =
+        candidates.partition(|format| ceiling.is_none_or(|ceiling| key(format).1 <= ceiling));
+    match within.is_empty() {
+        true => above.into_iter().min_by_key(|format| key(format).1),
+        false => within.into_iter().max_by_key(|format| key(format).1),
+    }
+}
+
+/// The streams a player answer offered, as `itag@kbps` pairs for a log line.
+fn offered(formats: impl Iterator<Item = (u32, u32)>) -> String {
+    formats
+        .map(|(itag, bitrate)| format!("{itag}@{}", bitrate / 1000))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn playability(response: &Value) -> Playability {
@@ -630,6 +695,11 @@ mod tests {
                 user_agent: "",
             },
         ];
-        assert_eq!(pick(formats).unwrap().itag, 140);
+        assert_eq!(
+            choose(formats, None, |format| (&format.mime, format.bitrate))
+                .unwrap()
+                .itag,
+            140
+        );
     }
 }
