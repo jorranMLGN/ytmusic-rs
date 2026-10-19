@@ -3,6 +3,8 @@ pub mod client;
 pub mod context;
 pub mod dedup;
 pub mod deobf;
+#[cfg(test)]
+pub(crate) mod fixtures;
 pub mod library;
 pub mod models;
 pub mod mutate;
@@ -14,6 +16,7 @@ pub mod radio;
 pub mod search;
 pub mod stream;
 pub mod util;
+pub mod web;
 
 pub use client::YtMusic;
 pub use context::Client;
