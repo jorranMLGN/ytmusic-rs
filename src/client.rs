@@ -173,7 +173,7 @@ impl YtMusic {
         body.as_object_mut()
             .context("payload must be an object")?
             .insert("context".to_string(), context);
-        if client == Client::Music {
+        if client == Client::Music && body.get("isAudioOnly").is_none() {
             body["isAudioOnly"] = json!(true);
         }
         let (base, origin) = match client {

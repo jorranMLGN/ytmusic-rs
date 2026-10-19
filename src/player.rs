@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,7 +7,7 @@ use serde_json::{Value, json};
 
 use crate::client::YtMusic;
 use crate::context::{Client, random_string};
-use crate::models::AudioFormat;
+use crate::models::{AudioFormat, VideoFormat};
 use crate::stream::AudioStream;
 
 const CHUNK: u64 = 1024 * 1024;
@@ -190,29 +191,10 @@ impl YtMusic {
         itag: Option<u32>,
     ) -> Result<AudioFormat> {
         let solver = self.solver().await?;
-        log::debug!(
-            "player: asking {} for {video_id}, player {} sts {}",
-            Client::Music.name(),
-            solver.id(),
-            solver.sts()
-        );
-        let payload = json!({
-            "videoId": video_id,
-            "contentCheckOk": true,
-            "racyCheckOk": true,
-            "cpn": random_string(16),
-            "serviceIntegrityDimensions": { "poToken": token },
-            "playbackContext": {
-                "contentPlaybackContext": {
-                    "html5Preference": "HTML5_PREF_WANTS",
-                    "signatureTimestamp": solver.sts(),
-                }
-            },
-        });
-        let response = self.execute("player", Client::Music, payload).await?;
+        let response = self.signed_player(video_id, token, &solver, true).await?;
         let mut audio: Vec<Ciphered> = playable(&response, video_id)?
             .iter()
-            .filter_map(ciphered)
+            .filter_map(|format| ciphered(format, is_audio))
             .collect();
         audio.sort_by_key(|format| std::cmp::Reverse(format.bitrate));
         let chosen = match itag {
@@ -235,6 +217,83 @@ impl YtMusic {
             loudness_db: chosen.loudness_db,
             user_agent: Client::Music.user_agent(),
         })
+    }
+
+    /// The signed-in client's `player` response for `video_id`, with `token` on the request.
+    /// `audio_only` false makes the client list its video streams too, which it leaves out by
+    /// default.
+    async fn signed_player(
+        &self,
+        video_id: &str,
+        token: &str,
+        solver: &crate::deobf::Solver,
+        audio_only: bool,
+    ) -> Result<Value> {
+        log::debug!(
+            "player: asking {} for {video_id}, player {} sts {}",
+            Client::Music.name(),
+            solver.id(),
+            solver.sts()
+        );
+        let payload = json!({
+            "videoId": video_id,
+            "contentCheckOk": true,
+            "racyCheckOk": true,
+            "isAudioOnly": audio_only,
+            "cpn": random_string(16),
+            "serviceIntegrityDimensions": { "poToken": token },
+            "playbackContext": {
+                "contentPlaybackContext": {
+                    "html5Preference": "HTML5_PREF_WANTS",
+                    "signatureTimestamp": solver.sts(),
+                }
+            },
+        });
+        self.execute("player", Client::Music, payload).await
+    }
+
+    /// The H.264 video-only streams of `video_id`, lowest resolution first.
+    ///
+    /// The same order as [`open_audio`](Self::open_audio): the guest client first, whose urls
+    /// need no deciphering, then the signed-in client with a proof-of-origin token. The guest
+    /// answer counts only when it holds an `avc1` stream. Other codecs and audio are left out,
+    /// so a caller can hand any entry to a decoder that only knows H.264.
+    pub async fn video_formats(self: &Arc<Self>, video_id: &str) -> Result<Vec<VideoFormat>> {
+        let refused = match self.guest_video(video_id).await {
+            Ok(formats) => return Ok(formats),
+            Err(error) => error,
+        };
+        log::debug!("player: the guest video for {video_id} failed ({refused:#})");
+        self.signed_video(video_id)
+            .await
+            .with_context(|| format!("the guest video failed too ({refused:#})"))
+    }
+
+    async fn guest_video(&self, video_id: &str) -> Result<Vec<VideoFormat>> {
+        let response = self.guest_player(video_id).await?;
+        let formats = playable(&response, video_id)?
+            .iter()
+            .filter_map(|format| video_format(format, Client::VisionOs))
+            .collect();
+        h264(formats).with_context(|| format!("no direct h264 stream for {video_id}"))
+    }
+
+    async fn signed_video(&self, video_id: &str) -> Result<Vec<VideoFormat>> {
+        let token = self.po_token().await;
+        let solver = self.solver().await?;
+        let response = self.signed_player(video_id, &token, &solver, false).await?;
+        let mut formats = Vec::new();
+        for raw in playable(&response, video_id)? {
+            let Some(held) = ciphered(raw, is_video) else {
+                continue;
+            };
+            let url = decipher(&solver, &held).await?;
+            let url = with_pot(&url, &token);
+            if let Some(format) = video_parts(raw, url, Client::Music) {
+                formats.push(format);
+            }
+        }
+        h264(formats).with_context(|| format!("no addressable h264 stream for {video_id}"))
     }
 
     async fn guest_player(&self, video_id: &str) -> Result<Value> {
@@ -344,9 +403,10 @@ struct Ciphered {
     signature: Option<(String, String)>,
 }
 
-fn ciphered(format: &Value) -> Option<Ciphered> {
+/// Reads a format that has to be deciphered before it plays, if `wanted` accepts its mime type.
+fn ciphered(format: &Value, wanted: impl Fn(&str) -> bool) -> Option<Ciphered> {
     let mime = format.get("mimeType").and_then(Value::as_str)?;
-    if !mime.starts_with("audio/") {
+    if !wanted(mime) {
         return None;
     }
     let (url, signature) = match format.get("signatureCipher").and_then(Value::as_str) {
@@ -571,6 +631,71 @@ fn audio_format(format: &Value, client: Client) -> Option<AudioFormat> {
     })
 }
 
+fn is_audio(mime: &str) -> bool {
+    mime.starts_with("audio/")
+}
+
+fn is_video(mime: &str) -> bool {
+    mime.starts_with("video/")
+}
+
+/// Keeps the `avc1` formats and sorts them by height, lowest first. `None` when none are left.
+fn h264(mut formats: Vec<VideoFormat>) -> Option<Vec<VideoFormat>> {
+    formats.retain(|format| format.codecs.starts_with("avc1"));
+    formats.sort_by_key(|format| format.height);
+    (!formats.is_empty()).then_some(formats)
+}
+
+/// A `{ "start": "0", "end": "741" }` byte range as the player response spells it, with the
+/// numbers as strings. The end is inclusive there and exclusive in the result.
+fn byte_range(format: &Value, key: &str) -> Option<Range<u64>> {
+    let range = format.get(key)?;
+    let bound = |name: &str| range.get(name)?.as_str()?.parse::<u64>().ok();
+    Some(bound("start")?..bound("end")?.checked_add(1)?)
+}
+
+/// A video-only stream with a direct url, or `None` for audio, a ciphered url or a missing field.
+fn video_format(format: &Value, client: Client) -> Option<VideoFormat> {
+    let mime = format.get("mimeType").and_then(Value::as_str)?;
+    if !is_video(mime) {
+        return None;
+    }
+    let url = format.get("url").and_then(Value::as_str)?;
+    video_parts(format, url.to_string(), client)
+}
+
+/// The video fields of `format` around a `url` that is already playable.
+fn video_parts(format: &Value, url: String, client: Client) -> Option<VideoFormat> {
+    let mime = format.get("mimeType").and_then(Value::as_str)?;
+    let number = |key: &str| format.get(key).and_then(Value::as_u64).unwrap_or(0) as u32;
+    let codecs = mime
+        .split_once("codecs=\"")
+        .map(|(_, tail)| tail.trim_end_matches('"'))
+        .unwrap_or_default();
+    Some(VideoFormat {
+        itag: format.get("itag").and_then(Value::as_u64)? as u32,
+        url,
+        mime: mime.to_string(),
+        codecs: codecs.to_string(),
+        width: number("width"),
+        height: number("height"),
+        fps: number("fps"),
+        bitrate: number("bitrate"),
+        content_length: format
+            .get("contentLength")
+            .and_then(Value::as_str)
+            .and_then(|length| length.parse().ok()),
+        init_range: byte_range(format, "initRange"),
+        index_range: byte_range(format, "indexRange"),
+        duration: format
+            .get("approxDurationMs")
+            .and_then(Value::as_str)
+            .and_then(|ms| ms.parse::<u64>().ok())
+            .map(Duration::from_millis),
+        user_agent: client.user_agent(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,5 +756,130 @@ mod tests {
             },
         ];
         assert_eq!(pick(formats).unwrap().itag, 140);
+    }
+
+    /// The guest `player` response recorded by `record_player_fixture`.
+    fn fixture() -> Vec<Value> {
+        let response: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/web/player_web.json")).unwrap();
+        response
+            .pointer("/streamingData/adaptiveFormats")
+            .and_then(Value::as_array)
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn h264_video_formats_parse_with_size_and_ranges() {
+        let formats: Vec<VideoFormat> = fixture()
+            .iter()
+            .filter_map(|format| video_format(format, Client::VisionOs))
+            .filter(|format| format.codecs.starts_with("avc1"))
+            .collect();
+        assert!(formats.len() >= 5, "got {}", formats.len());
+        for format in &formats {
+            assert!(format.mime.starts_with("video/mp4"), "{}", format.mime);
+            assert!(format.codecs.starts_with("avc1"));
+            assert!(!format.mime.starts_with("audio/"));
+        }
+        let full = formats.iter().find(|format| format.height == 1080).unwrap();
+        assert_eq!(full.itag, 137);
+        assert_eq!(full.init_range, Some(0..742));
+        assert_eq!(full.index_range, Some(742..1230));
+        assert!(full.width > full.height);
+        assert!(full.fps > 0);
+    }
+
+    #[test]
+    fn audio_formats_are_unchanged_by_the_generic_filter() {
+        let itags: Vec<u32> = fixture()
+            .iter()
+            .filter_map(|format| audio_format(format, Client::VisionOs))
+            .map(|format| format.itag)
+            .collect();
+        assert_eq!(itags, [139, 140, 249, 250, 251]);
+        let kept: Vec<u32> = fixture()
+            .iter()
+            .filter_map(|format| ciphered(format, |mime| mime.starts_with("audio/")))
+            .map(|format| format.itag)
+            .collect();
+        assert_eq!(kept, itags);
+    }
+
+    /// Replaces what identifies the recording machine in a recorded response: the address a
+    /// stream url is bound to (`ip=` and `mip=` parameters, whatever the family) and every
+    /// `visitorData` value. Run it over a response before it is written as a fixture.
+    fn scrub(value: &mut Value) {
+        match value {
+            Value::String(text) => *text = scrub_ip(text),
+            Value::Array(items) => items.iter_mut().for_each(scrub),
+            Value::Object(map) => {
+                for (key, inner) in map.iter_mut() {
+                    match key.as_str() {
+                        "visitorData" => *inner = json!("VISITOR_DATA"),
+                        _ => scrub(inner),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `text` with the value of every `ip=` parameter, and the segment after every `/ip/` path
+    /// component, set to `0.0.0.0`.
+    fn scrub_ip(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some((at, marker)) = ["ip=", "/ip/"]
+            .iter()
+            .filter_map(|marker| rest.find(marker).map(|at| (at, marker.len())))
+            .min()
+        {
+            let (head, tail) = rest.split_at(at + marker);
+            out.push_str(head);
+            let value = tail
+                .find(|c: char| !(c.is_ascii_hexdigit() || c == '.' || c == ':' || c == '%'))
+                .unwrap_or(tail.len());
+            let numeric = tail[..value].contains(['.', ':']);
+            match numeric {
+                true => out.push_str("0.0.0.0"),
+                false => out.push_str(&tail[..value]),
+            }
+            rest = &tail[value..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn scrub_replaces_the_address_and_visitor() {
+        let mut value = json!({
+            "visitorData": "abc",
+            "url": "https://h/p?ei=x&ip=203.0.113.7&id=o&mip=2001:db8::1&ipbits=0&sparams=ip,id",
+        });
+        scrub(&mut value);
+        assert_eq!(value["visitorData"], "VISITOR_DATA");
+        assert_eq!(
+            value["url"],
+            "https://h/p?ei=x&ip=0.0.0.0&id=o&mip=0.0.0.0&ipbits=0&sparams=ip,id"
+        );
+    }
+
+    /// Records the guest `player` response into the fixture the format tests read. The WEB
+    /// client answers a guest `UNPLAYABLE` without a proof-of-origin token, so this asks the
+    /// client the crate already uses for guest streams. Live and read-only, so it is ignored
+    /// and run by exact name.
+    #[tokio::test]
+    #[ignore]
+    async fn record_player_fixture() {
+        let api = YtMusic::anonymous();
+        let mut response = api.guest_player("dQw4w9WgXcQ").await.unwrap();
+        scrub(&mut response);
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/web/player_web.json"
+        );
+        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_string_pretty(&response).unwrap()).unwrap();
     }
 }

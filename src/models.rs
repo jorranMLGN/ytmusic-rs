@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -146,6 +147,27 @@ pub struct AudioFormat {
     pub duration: Option<Duration>,
     pub content_length: Option<u64>,
     pub loudness_db: Option<f32>,
+    pub user_agent: &'static str,
+}
+
+/// A video-only stream of a video, as the player offers it.
+///
+/// `init_range` and `index_range` are the byte ranges of the fragmented MP4's header and
+/// segment index, end exclusive. The url is only good for the client named by `user_agent`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VideoFormat {
+    pub itag: u32,
+    pub url: String,
+    pub mime: String,
+    pub codecs: String,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub bitrate: u32,
+    pub content_length: Option<u64>,
+    pub init_range: Option<Range<u64>>,
+    pub index_range: Option<Range<u64>>,
+    pub duration: Option<Duration>,
     pub user_agent: &'static str,
 }
 
