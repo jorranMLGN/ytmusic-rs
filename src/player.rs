@@ -36,8 +36,15 @@ impl Playability {
         self.status == "OK"
     }
 
+    /// Whether signing in (or joining the channel, for members-only videos) would make the
+    /// video playable.
     pub fn gated(&self) -> bool {
-        self.status == "LOGIN_REQUIRED"
+        let members = self.status == "UNPLAYABLE"
+            && self.reason.as_deref().is_some_and(|reason| {
+                let reason = reason.to_lowercase();
+                reason.contains("members-only") || reason.contains("join this channel")
+            });
+        self.status == "LOGIN_REQUIRED" || members
     }
 }
 
@@ -881,5 +888,23 @@ mod tests {
         );
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         std::fs::write(path, serde_json::to_string_pretty(&response).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_unplayable_response_reports_sign_in_or_unavailable() {
+        let status = |value: Value| json!({ "playabilityStatus": value });
+        let login = status(json!({"status": "LOGIN_REQUIRED", "reason": "Sign in to confirm"}));
+        let members = status(json!({
+            "status": "UNPLAYABLE",
+            "reason": "Join this channel to get access to members-only content like this video"
+        }));
+        let removed = status(json!({"status": "ERROR", "reason": "Video unavailable"}));
+        for response in [&login, &members] {
+            let error = playable(response, "abc").unwrap_err();
+            assert!(error.is::<SignInRequired>(), "{error:#}");
+        }
+        let error = playable(&removed, "abc").unwrap_err();
+        assert!(!error.is::<SignInRequired>());
+        assert!(format!("{error:#}").contains("Video unavailable"));
     }
 }

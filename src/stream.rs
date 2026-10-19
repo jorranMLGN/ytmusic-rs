@@ -81,6 +81,28 @@ impl AudioStream {
         self
     }
 
+    /// A new stream over the same file that starts at byte `at`, for a seek. It keeps the url,
+    /// agent, length and renewal (with a fresh handle on the client), opens nothing until its
+    /// first `chunk`, and leaves this stream untouched.
+    pub fn resumed(&self, at: u64) -> AudioStream {
+        AudioStream {
+            http: self.http.clone(),
+            url: self.url.clone(),
+            agent: self.agent,
+            total: self.total,
+            offset: at,
+            end: 0,
+            response: None,
+            failures: 0,
+            renewal: self.renewal.as_ref().map(|renewal| Renewal {
+                client: Weak::clone(&renewal.client),
+                video_id: renewal.video_id.clone(),
+                itag: renewal.itag,
+                at: None,
+            }),
+        }
+    }
+
     /// The length of the body, when the player response gave one.
     pub fn total(&self) -> Option<u64> {
         self.total
@@ -237,4 +259,81 @@ pub(crate) async fn request(
         bail!(Refused(status));
     }
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    /// Serves `body` with range support on a local port and records each `Range` header.
+    async fn serve(body: Arc<Vec<u8>>) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/audio", listener.local_addr().unwrap());
+        let ranges = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = ranges.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let (body, seen) = (body.clone(), seen.clone());
+                tokio::spawn(async move {
+                    let mut buffer = vec![0u8; 8192];
+                    let read = socket.read(&mut buffer).await.unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let range = request
+                        .lines()
+                        .find_map(|line| {
+                            line.to_lowercase()
+                                .strip_prefix("range: bytes=")
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_default();
+                    seen.lock().unwrap().push(range.clone());
+                    let (start, end) = range.split_once('-').unwrap_or(("0", ""));
+                    let start: usize = start.parse().unwrap_or(0);
+                    let last = body.len() - 1;
+                    let end: usize = end.parse().unwrap_or(last).min(last);
+                    let part = &body[start..=end];
+                    let head = format!(
+                        "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\n\
+                         Content-Range: bytes {start}-{end}/{}\r\nConnection: close\r\n\r\n",
+                        part.len(),
+                        body.len()
+                    );
+                    let _ = socket.write_all(head.as_bytes()).await;
+                    let _ = socket.write_all(part).await;
+                });
+            }
+        });
+        (url, ranges)
+    }
+
+    #[tokio::test]
+    async fn a_resumed_stream_asks_from_its_offset() {
+        let body: Arc<Vec<u8>> = Arc::new((0..3 * 1024 * 1024).map(|n| (n % 251) as u8).collect());
+        let (url, ranges) = serve(body.clone()).await;
+        let format = AudioFormat {
+            itag: 140,
+            url,
+            mime: "audio/mp4".into(),
+            codec: "mp4a.40.2".into(),
+            bitrate: 128_000,
+            duration: None,
+            content_length: Some(body.len() as u64),
+            loudness_db: None,
+            user_agent: "test",
+        };
+        let first = AudioStream::open(reqwest::Client::new(), &format)
+            .await
+            .unwrap();
+        let at = 2 * 1024 * 1024u64;
+        let mut resumed = first.resumed(at);
+        let chunk = resumed.chunk().await.unwrap().unwrap();
+        let at = at as usize;
+        assert_eq!(&chunk[..], &body[at..at + chunk.len()]);
+        let ranges = ranges.lock().unwrap();
+        assert!(ranges.last().unwrap().starts_with("2097152-"), "{ranges:?}");
+    }
 }
