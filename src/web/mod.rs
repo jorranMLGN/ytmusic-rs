@@ -51,3 +51,23 @@ pub struct WebSearch {
     pub channels: Vec<Channel>,
     pub playlists: Vec<WebPlaylist>,
 }
+
+/// A channel's page: who it is and the first page of its uploads. `continuation` leads to the
+/// next page through `YtMusic::web_continuation`. `channel.subscribed` is always `None` here;
+/// callers read subscription state from `YtMusic::web_subscriptions`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChannelPage {
+    pub channel: Channel,
+    pub description: Option<String>,
+    pub uploads: Vec<Video>,
+    pub continuation: Option<String>,
+}
+
+/// A playlist's page: the playlist and the first page of its videos. `continuation` leads to
+/// the next page through `YtMusic::web_continuation`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaylistPage {
+    pub playlist: WebPlaylist,
+    pub videos: Vec<Video>,
+    pub continuation: Option<String>,
+}

@@ -1,0 +1,357 @@
+{
+  "responseContext": {
+    "mainAppWebResponseContext": {
+      "loggedOut": false
+    },
+    "serviceTrackingParams": [
+      {
+        "service": "GFEEDBACK",
+        "params": [
+          {
+            "key": "browse_id",
+            "value": "FEplaylist_aggregation"
+          },
+          {
+            "key": "logged_in",
+            "value": "1"
+          },
+          {
+            "key": "visitor_data",
+            "value": "VISITOR_DATA"
+          }
+        ]
+      }
+    ]
+  },
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "gridRenderer": {
+                            "items": [
+                              {
+                                "lockupViewModel": {
+                                  "contentId": "LL",
+                                  "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST",
+                                  "contentImage": {
+                                    "collectionThumbnailViewModel": {
+                                      "primaryThumbnail": {
+                                        "thumbnailViewModel": {
+                                          "image": {
+                                            "sources": [
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg",
+                                                "width": 168,
+                                                "height": 94
+                                              },
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg?w=336",
+                                                "width": 336,
+                                                "height": 188
+                                              }
+                                            ]
+                                          },
+                                          "overlays": [
+                                            {
+                                              "thumbnailOverlayBadgeViewModel": {
+                                                "thumbnailBadges": [
+                                                  {
+                                                    "thumbnailBadgeViewModel": {
+                                                      "text": "4 videos"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "metadata": {
+                                    "lockupMetadataViewModel": {
+                                      "title": {
+                                        "content": "Liked videos"
+                                      },
+                                      "metadata": {
+                                        "contentMetadataViewModel": {
+                                          "metadataRows": [
+                                            {
+                                              "metadataParts": [
+                                                {
+                                                  "text": {
+                                                    "content": "Playlist"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "lockupViewModel": {
+                                  "contentId": "WL",
+                                  "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST",
+                                  "contentImage": {
+                                    "collectionThumbnailViewModel": {
+                                      "primaryThumbnail": {
+                                        "thumbnailViewModel": {
+                                          "image": {
+                                            "sources": [
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000002/hqdefault.jpg",
+                                                "width": 168,
+                                                "height": 94
+                                              },
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000002/hqdefault.jpg?w=336",
+                                                "width": 336,
+                                                "height": 188
+                                              }
+                                            ]
+                                          },
+                                          "overlays": [
+                                            {
+                                              "thumbnailOverlayBadgeViewModel": {
+                                                "thumbnailBadges": [
+                                                  {
+                                                    "thumbnailBadgeViewModel": {
+                                                      "text": "5 videos"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "metadata": {
+                                    "lockupMetadataViewModel": {
+                                      "title": {
+                                        "content": "Watch later"
+                                      },
+                                      "metadata": {
+                                        "contentMetadataViewModel": {
+                                          "metadataRows": [
+                                            {
+                                              "metadataParts": [
+                                                {
+                                                  "text": {
+                                                    "content": "Playlist"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "lockupViewModel": {
+                                  "contentId": "PL000000000000000000000000000000001",
+                                  "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST",
+                                  "contentImage": {
+                                    "collectionThumbnailViewModel": {
+                                      "primaryThumbnail": {
+                                        "thumbnailViewModel": {
+                                          "image": {
+                                            "sources": [
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg",
+                                                "width": 168,
+                                                "height": 94
+                                              },
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg?w=336",
+                                                "width": 336,
+                                                "height": 188
+                                              }
+                                            ]
+                                          },
+                                          "overlays": [
+                                            {
+                                              "thumbnailOverlayBadgeViewModel": {
+                                                "thumbnailBadges": [
+                                                  {
+                                                    "thumbnailBadgeViewModel": {
+                                                      "text": "12 videos"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "metadata": {
+                                    "lockupMetadataViewModel": {
+                                      "title": {
+                                        "content": "Playlist 1"
+                                      },
+                                      "metadata": {
+                                        "contentMetadataViewModel": {
+                                          "metadataRows": [
+                                            {
+                                              "metadataParts": [
+                                                {
+                                                  "text": {
+                                                    "content": "Playlist"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "lockupViewModel": {
+                                  "contentId": "PL000000000000000000000000000000002",
+                                  "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST",
+                                  "contentImage": {
+                                    "collectionThumbnailViewModel": {
+                                      "primaryThumbnail": {
+                                        "thumbnailViewModel": {
+                                          "image": {
+                                            "sources": [
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000002/hqdefault.jpg",
+                                                "width": 168,
+                                                "height": 94
+                                              },
+                                              {
+                                                "url": "https://i.ytimg.com/vi/video000002/hqdefault.jpg?w=336",
+                                                "width": 336,
+                                                "height": 188
+                                              }
+                                            ]
+                                          },
+                                          "overlays": [
+                                            {
+                                              "thumbnailOverlayBadgeViewModel": {
+                                                "thumbnailBadges": [
+                                                  {
+                                                    "thumbnailBadgeViewModel": {
+                                                      "text": "3 videos"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "metadata": {
+                                    "lockupMetadataViewModel": {
+                                      "title": {
+                                        "content": "Playlist 2"
+                                      },
+                                      "metadata": {
+                                        "contentMetadataViewModel": {
+                                          "metadataRows": [
+                                            {
+                                              "metadataParts": [
+                                                {
+                                                  "text": {
+                                                    "content": "Playlist"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "gridPlaylistRenderer": {
+                                  "playlistId": "PL000000000000000000000000000000003",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "Playlist 3"
+                                      }
+                                    ]
+                                  },
+                                  "videoCountText": {
+                                    "runs": [
+                                      {
+                                        "text": "7"
+                                      },
+                                      {
+                                        "text": " videos"
+                                      }
+                                    ]
+                                  },
+                                  "thumbnail": {
+                                    "thumbnails": [
+                                      {
+                                        "url": "https://i.ytimg.com/vi/video000003/hqdefault.jpg",
+                                        "width": 336,
+                                        "height": 188
+                                      }
+                                    ]
+                                  },
+                                  "shortBylineText": {
+                                    "runs": [
+                                      {
+                                        "text": "Channel 1",
+                                        "navigationEndpoint": {
+                                          "browseEndpoint": {
+                                            "browseId": "UC000000000000000000001"
+                                          },
+                                          "commandMetadata": {
+                                            "webCommandMetadata": {
+                                              "apiUrl": "/youtubei/v1/browse",
+                                              "url": "/channel/UC000000000000000000001",
+                                              "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

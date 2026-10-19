@@ -1,0 +1,503 @@
+{
+  "responseContext": {
+    "mainAppWebResponseContext": {
+      "loggedOut": false
+    },
+    "serviceTrackingParams": [
+      {
+        "service": "GFEEDBACK",
+        "params": [
+          {
+            "key": "browse_id",
+            "value": "VLLL"
+          },
+          {
+            "key": "logged_in",
+            "value": "1"
+          },
+          {
+            "key": "visitor_data",
+            "value": "VISITOR_DATA"
+          }
+        ]
+      }
+    ]
+  },
+  "header": {
+    "pageHeaderRenderer": {
+      "content": {
+        "pageHeaderViewModel": {
+          "title": {
+            "dynamicTextViewModel": {
+              "text": {
+                "content": "Liked videos"
+              }
+            }
+          },
+          "heroImage": {
+            "contentPreviewImageViewModel": {
+              "image": {
+                "sources": [
+                  {
+                    "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg",
+                    "width": 168,
+                    "height": 94
+                  },
+                  {
+                    "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg?w=336",
+                    "width": 336,
+                    "height": 188
+                  }
+                ]
+              }
+            }
+          },
+          "metadata": {
+            "contentMetadataViewModel": {
+              "delimiter": " \u2022 ",
+              "metadataRows": [
+                {
+                  "metadataParts": [
+                    {
+                      "avatarStack": {
+                        "avatarStackViewModel": {
+                          "avatars": [],
+                          "text": {
+                            "content": "by Channel 1",
+                            "commandRuns": [
+                              {
+                                "length": 12,
+                                "startIndex": 0,
+                                "onTap": {
+                                  "innertubeCommand": {
+                                    "browseEndpoint": {
+                                      "browseId": "UC000000000000000000001"
+                                    },
+                                    "commandMetadata": {
+                                      "webCommandMetadata": {
+                                        "apiUrl": "/youtubei/v1/browse",
+                                        "url": "/channel/UC000000000000000000001",
+                                        "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "metadataParts": [
+                    {
+                      "text": {
+                        "content": "Playlist"
+                      }
+                    },
+                    {
+                      "text": {
+                        "content": "4 videos"
+                      }
+                    },
+                    {
+                      "text": {
+                        "content": "No views"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "metadata": {
+    "playlistMetadataRenderer": {
+      "title": "Liked videos"
+    }
+  },
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "selected": true,
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "lockupViewModel": {
+                            "contentId": "video000001",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "image": {
+                                  "sources": [
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg",
+                                      "width": 168,
+                                      "height": 94
+                                    },
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000001/hqdefault.jpg?w=336",
+                                      "width": 336,
+                                      "height": 188
+                                    }
+                                  ]
+                                },
+                                "overlays": [
+                                  {
+                                    "thumbnailBottomOverlayViewModel": {
+                                      "badges": [
+                                        {
+                                          "thumbnailBadgeViewModel": {
+                                            "text": "3:55"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": {
+                                  "content": "Video 1"
+                                },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "delimiter": " \u2022 ",
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "Channel 1",
+                                              "commandRuns": [
+                                                {
+                                                  "length": 9,
+                                                  "startIndex": 0,
+                                                  "onTap": {
+                                                    "innertubeCommand": {
+                                                      "browseEndpoint": {
+                                                        "browseId": "UC000000000000000000001"
+                                                      },
+                                                      "commandMetadata": {
+                                                        "webCommandMetadata": {
+                                                          "apiUrl": "/youtubei/v1/browse",
+                                                          "url": "/channel/UC000000000000000000001",
+                                                          "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "1K views"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "lockupViewModel": {
+                            "contentId": "video000002",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "image": {
+                                  "sources": [
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000002/hqdefault.jpg",
+                                      "width": 168,
+                                      "height": 94
+                                    },
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000002/hqdefault.jpg?w=336",
+                                      "width": 336,
+                                      "height": 188
+                                    }
+                                  ]
+                                },
+                                "overlays": [
+                                  {
+                                    "thumbnailBottomOverlayViewModel": {
+                                      "badges": [
+                                        {
+                                          "thumbnailBadgeViewModel": {
+                                            "text": "4:10"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": {
+                                  "content": "Video 2"
+                                },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "delimiter": " \u2022 ",
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "Channel 2",
+                                              "commandRuns": [
+                                                {
+                                                  "length": 9,
+                                                  "startIndex": 0,
+                                                  "onTap": {
+                                                    "innertubeCommand": {
+                                                      "browseEndpoint": {
+                                                        "browseId": "UC000000000000000000002"
+                                                      },
+                                                      "commandMetadata": {
+                                                        "webCommandMetadata": {
+                                                          "apiUrl": "/youtubei/v1/browse",
+                                                          "url": "/channel/UC000000000000000000002",
+                                                          "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "1K views"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "lockupViewModel": {
+                            "contentId": "video000003",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "image": {
+                                  "sources": [
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000003/hqdefault.jpg",
+                                      "width": 168,
+                                      "height": 94
+                                    },
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000003/hqdefault.jpg?w=336",
+                                      "width": 336,
+                                      "height": 188
+                                    }
+                                  ]
+                                },
+                                "overlays": [
+                                  {
+                                    "thumbnailBottomOverlayViewModel": {
+                                      "badges": [
+                                        {
+                                          "thumbnailBadgeViewModel": {
+                                            "text": "1:02:03"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": {
+                                  "content": "Video 3"
+                                },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "delimiter": " \u2022 ",
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "Channel 3",
+                                              "commandRuns": [
+                                                {
+                                                  "length": 9,
+                                                  "startIndex": 0,
+                                                  "onTap": {
+                                                    "innertubeCommand": {
+                                                      "browseEndpoint": {
+                                                        "browseId": "UC000000000000000000003"
+                                                      },
+                                                      "commandMetadata": {
+                                                        "webCommandMetadata": {
+                                                          "apiUrl": "/youtubei/v1/browse",
+                                                          "url": "/channel/UC000000000000000000003",
+                                                          "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "1K views"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "lockupViewModel": {
+                            "contentId": "video000004",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "image": {
+                                  "sources": [
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000004/hqdefault.jpg",
+                                      "width": 168,
+                                      "height": 94
+                                    },
+                                    {
+                                      "url": "https://i.ytimg.com/vi/video000004/hqdefault.jpg?w=336",
+                                      "width": 336,
+                                      "height": 188
+                                    }
+                                  ]
+                                },
+                                "overlays": [
+                                  {
+                                    "thumbnailBottomOverlayViewModel": {
+                                      "badges": [
+                                        {
+                                          "thumbnailBadgeViewModel": {
+                                            "text": "2:30"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": {
+                                  "content": "Video 4"
+                                },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "delimiter": " \u2022 ",
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "Channel 1",
+                                              "commandRuns": [
+                                                {
+                                                  "length": 9,
+                                                  "startIndex": 0,
+                                                  "onTap": {
+                                                    "innertubeCommand": {
+                                                      "browseEndpoint": {
+                                                        "browseId": "UC000000000000000000001"
+                                                      },
+                                                      "commandMetadata": {
+                                                        "webCommandMetadata": {
+                                                          "apiUrl": "/youtubei/v1/browse",
+                                                          "url": "/channel/UC000000000000000000001",
+                                                          "webPageType": "WEB_PAGE_TYPE_CHANNEL"
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "metadataParts": [
+                                          {
+                                            "text": {
+                                              "content": "1K views"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
