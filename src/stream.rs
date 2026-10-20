@@ -41,11 +41,19 @@ pub struct AudioStream {
     renewal: Option<Renewal>,
 }
 
+/// Which of a video id's streams a renewal asks the player for.
+#[derive(Clone, Copy)]
+enum Kind {
+    Audio,
+    Video,
+}
+
 /// What a stream needs to ask the player for a fresh url of the same file.
 struct Renewal {
     client: Weak<YtMusic>,
     video_id: String,
     itag: u32,
+    kind: Kind,
     /// The byte the last renewal was made at. A renewed url refused at that same byte ends the
     /// stream instead of renewing forever.
     at: Option<u64>,
@@ -55,11 +63,28 @@ impl AudioStream {
     /// Sends the first range request and checks the stream host accepts it. A refusal here is
     /// the same answer a probe would have got, so a caller can fall back to another url.
     pub async fn open(http: reqwest::Client, format: &AudioFormat) -> Result<Self> {
+        Self::open_url(
+            http,
+            format.url.clone(),
+            format.user_agent,
+            format.content_length,
+        )
+        .await
+    }
+
+    /// The same as [`open`](Self::open) for any file, given its url, the agent the url is bound
+    /// to and its length when known. A video stream goes through here.
+    pub(crate) async fn open_url(
+        http: reqwest::Client,
+        url: String,
+        agent: &'static str,
+        total: Option<u64>,
+    ) -> Result<Self> {
         let mut stream = Self {
             http,
-            url: format.url.clone(),
-            agent: format.user_agent,
-            total: format.content_length,
+            url,
+            agent,
+            total,
             offset: 0,
             end: 0,
             response: None,
@@ -71,11 +96,27 @@ impl AudioStream {
     }
 
     /// Lets the stream renew its url through `client` when the host refuses it partway through.
-    pub(crate) fn renewing(mut self, client: &Arc<YtMusic>, video_id: &str, itag: u32) -> Self {
+    pub(crate) fn renewing(self, client: &Arc<YtMusic>, video_id: &str, itag: u32) -> Self {
+        self.renewing_kind(client, video_id, itag, Kind::Audio)
+    }
+
+    /// Like [`renewing`](Self::renewing), for the video-only stream `itag`.
+    pub(crate) fn renewing_video(self, client: &Arc<YtMusic>, video_id: &str, itag: u32) -> Self {
+        self.renewing_kind(client, video_id, itag, Kind::Video)
+    }
+
+    fn renewing_kind(
+        mut self,
+        client: &Arc<YtMusic>,
+        video_id: &str,
+        itag: u32,
+        kind: Kind,
+    ) -> Self {
         self.renewal = Some(Renewal {
             client: Arc::downgrade(client),
             video_id: video_id.to_string(),
             itag,
+            kind,
             at: None,
         });
         self
@@ -98,6 +139,7 @@ impl AudioStream {
                 client: Weak::clone(&renewal.client),
                 video_id: renewal.video_id.clone(),
                 itag: renewal.itag,
+                kind: renewal.kind,
                 at: None,
             }),
         }
@@ -184,20 +226,27 @@ impl AudioStream {
             renewal.video_id,
             self.offset
         );
-        let format = client
-            .renewed_audio(&renewal.video_id, renewal.itag)
-            .await
-            .map_err(|error| refused.context(format!("cannot renew the url: {error:#}")))?;
-        if format.content_length != self.total {
+        let (url, agent, length) = match renewal.kind {
+            Kind::Audio => client
+                .renewed_audio(&renewal.video_id, renewal.itag)
+                .await
+                .map(|format| (format.url, format.user_agent, format.content_length)),
+            Kind::Video => client
+                .renewed_video(&renewal.video_id, renewal.itag)
+                .await
+                .map(|format| (format.url, format.user_agent, format.content_length)),
+        }
+        .map_err(|error| refused.context(format!("cannot renew the url: {error:#}")))?;
+        if length != self.total {
             bail!(
                 "the renewed url for {} is {:?} bytes long, not {:?}",
                 renewal.video_id,
-                format.content_length,
+                length,
                 self.total
             );
         }
-        self.url = format.url;
-        self.agent = format.user_agent;
+        self.url = url;
+        self.agent = agent;
         Ok(())
     }
 

@@ -1,0 +1,504 @@
+{
+  "adBreakHeartbeatParams": "Q0FBJTNE",
+  "microformat": {
+    "microformatDataRenderer": {
+      "androidPackage": "com.google.android.apps.youtube.music",
+      "appName": "YouTube Music",
+      "availableCountries": [
+        "AD",
+        "AE",
+        "AF",
+        "AG",
+        "AI",
+        "AL",
+        "AM",
+        "AO",
+        "AQ",
+        "AR",
+        "AS",
+        "AT",
+        "AU",
+        "AW",
+        "AX",
+        "AZ",
+        "BA",
+        "BB",
+        "BD",
+        "BE",
+        "BF",
+        "BG",
+        "BH",
+        "BI",
+        "BJ",
+        "BL",
+        "BM",
+        "BN",
+        "BO",
+        "BQ",
+        "BR",
+        "BS",
+        "BT",
+        "BV",
+        "BW",
+        "BY",
+        "BZ",
+        "CA",
+        "CC",
+        "CD",
+        "CF",
+        "CG",
+        "CH",
+        "CI",
+        "CK",
+        "CL",
+        "CM",
+        "CN",
+        "CO",
+        "CR",
+        "CU",
+        "CV",
+        "CW",
+        "CX",
+        "CY",
+        "CZ",
+        "DE",
+        "DJ",
+        "DK",
+        "DM",
+        "DO",
+        "DZ",
+        "EC",
+        "EE",
+        "EG",
+        "EH",
+        "ER",
+        "ES",
+        "ET",
+        "FI",
+        "FJ",
+        "FK",
+        "FM",
+        "FO",
+        "FR",
+        "GA",
+        "GB",
+        "GD",
+        "GE",
+        "GF",
+        "GG",
+        "GH",
+        "GI",
+        "GL",
+        "GM",
+        "GN",
+        "GP",
+        "GQ",
+        "GR",
+        "GS",
+        "GT",
+        "GU",
+        "GW",
+        "GY",
+        "HK",
+        "HM",
+        "HN",
+        "HR",
+        "HT",
+        "HU",
+        "ID",
+        "IE",
+        "IL",
+        "IM",
+        "IN",
+        "IO",
+        "IQ",
+        "IR",
+        "IS",
+        "IT",
+        "JE",
+        "JM",
+        "JO",
+        "JP",
+        "KE",
+        "KG",
+        "KH",
+        "KI",
+        "KM",
+        "KN",
+        "KP",
+        "KR",
+        "KW",
+        "KY",
+        "KZ",
+        "LA",
+        "LB",
+        "LC",
+        "LI",
+        "LK",
+        "LR",
+        "LS",
+        "LT",
+        "LU",
+        "LV",
+        "LY",
+        "MA",
+        "MC",
+        "MD",
+        "ME",
+        "MF",
+        "MG",
+        "MH",
+        "MK",
+        "ML",
+        "MM",
+        "MN",
+        "MO",
+        "MP",
+        "MQ",
+        "MR",
+        "MS",
+        "MT",
+        "MU",
+        "MV",
+        "MW",
+        "MX",
+        "MY",
+        "MZ",
+        "NA",
+        "NC",
+        "NE",
+        "NF",
+        "NG",
+        "NI",
+        "NL",
+        "NO",
+        "NP",
+        "NR",
+        "NU",
+        "NZ",
+        "OM",
+        "PA",
+        "PE",
+        "PF",
+        "PG",
+        "PH",
+        "PK",
+        "PL",
+        "PM",
+        "PN",
+        "PR",
+        "PS",
+        "PT",
+        "PW",
+        "PY",
+        "QA",
+        "RE",
+        "RO",
+        "RS",
+        "RU",
+        "RW",
+        "SA",
+        "SB",
+        "SC",
+        "SD",
+        "SE",
+        "SG",
+        "SH",
+        "SI",
+        "SJ",
+        "SK",
+        "SL",
+        "SM",
+        "SN",
+        "SO",
+        "SR",
+        "SS",
+        "ST",
+        "SV",
+        "SX",
+        "SY",
+        "SZ",
+        "TC",
+        "TD",
+        "TF",
+        "TG",
+        "TH",
+        "TJ",
+        "TK",
+        "TL",
+        "TM",
+        "TN",
+        "TO",
+        "TR",
+        "TT",
+        "TV",
+        "TW",
+        "TZ",
+        "UA",
+        "UG",
+        "UM",
+        "US",
+        "UY",
+        "UZ",
+        "VA",
+        "VC",
+        "VE",
+        "VG",
+        "VI",
+        "VN",
+        "VU",
+        "WF",
+        "WS",
+        "YE",
+        "YT",
+        "ZA",
+        "ZM",
+        "ZW"
+      ],
+      "category": "Music",
+      "description": "Rick Astley",
+      "familySafe": true,
+      "iosAppArguments": "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+      "iosAppStoreId": "1017492454",
+      "linkAlternates": [
+        {
+          "hrefUrl": "android-app://com.google.android.youtube/http/youtube.com/watch?v=dQw4w9WgXcQ"
+        },
+        {
+          "hrefUrl": "ios-app://544007664/http/youtube.com/watch?v=dQw4w9WgXcQ"
+        },
+        {
+          "alternateType": "application/json+oembed",
+          "hrefUrl": "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fmusic.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ",
+          "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)"
+        },
+        {
+          "alternateType": "text/xml+oembed",
+          "hrefUrl": "https://www.youtube.com/oembed?format=xml&url=https%3A%2F%2Fmusic.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ",
+          "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)"
+        }
+      ],
+      "noindex": false,
+      "ogType": "video.other",
+      "pageOwnerDetails": {
+        "externalChannelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+        "name": "Rick Astley",
+        "youtubeProfileUrl": "http://www.youtube.com/@RickAstleyYT"
+      },
+      "paid": false,
+      "publishDate": "2009-10-24T23:57:33-07:00",
+      "schemaDotOrgType": "http://schema.org/VideoObject",
+      "siteName": "YouTube Music",
+      "tags": [
+        "rick astley",
+        "Never Gonna Give You Up",
+        "nggyu",
+        "never gonna give you up lyrics",
+        "rick rolled",
+        "Rick Roll",
+        "rick astley official",
+        "rickrolled",
+        "Fortnite song",
+        "Fortnite event",
+        "Fortnite dance",
+        "fortnite never gonna give you up",
+        "rick roll",
+        "rickrolling",
+        "rick rolling",
+        "never gonna give you up",
+        "80s music",
+        "rick astley new",
+        "animated video",
+        "rickroll",
+        "meme songs",
+        "never gonna give u up lyrics",
+        "Rick Astley 2022",
+        "never gonna let you down",
+        "animated",
+        "rick rolls 2022",
+        "never gonna give you up karaoke"
+      ],
+      "thumbnail": {
+        "thumbnails": [
+          {
+            "height": 720,
+            "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+            "width": 1280
+          }
+        ]
+      },
+      "title": "Never Gonna Give You Up",
+      "twitterCardType": "summary",
+      "twitterSiteHandle": "@YouTubeMusic",
+      "unlisted": false,
+      "uploadDate": "2009-10-24T23:57:33-07:00",
+      "urlApplinksAndroid": "vnd.youtube.music://music.youtube.com/watch?v=dQw4w9WgXcQ&feature=applinks",
+      "urlApplinksIos": "vnd.youtube.music://music.youtube.com/watch?v=dQw4w9WgXcQ&feature=applinks",
+      "urlCanonical": "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+      "urlTwitterAndroid": "vnd.youtube.music://music.youtube.com/watch?v=dQw4w9WgXcQ&feature=twitter-deep-link",
+      "urlTwitterIos": "vnd.youtube.music://music.youtube.com/watch?v=dQw4w9WgXcQ&feature=twitter-deep-link",
+      "videoDetails": {
+        "durationIso8601": "PT3M34S",
+        "durationSeconds": "214",
+        "externalVideoId": "dQw4w9WgXcQ"
+      },
+      "viewCount": "1828572859"
+    }
+  },
+  "playabilityStatus": {
+    "contextParams": "Q0FFU0FnZ0I=",
+    "errorScreen": {
+      "playerErrorMessageRenderer": {
+        "icon": {
+          "iconType": "ERROR_OUTLINE"
+        },
+        "proceedButton": {
+          "buttonRenderer": {
+            "command": {
+              "clickTrackingParams": "CAEQ8FsiEwiNw9uX1siXAxUrX3oFHRqaMj_KAQQqBzkO",
+              "signalAction": {
+                "signal": "RELOAD_PAGE"
+              }
+            },
+            "isDisabled": false,
+            "style": "STYLE_PRIMARY",
+            "text": {
+              "runs": [
+                {
+                  "text": "Reload"
+                }
+              ]
+            },
+            "trackingParams": "CAEQ8FsiEwiNw9uX1siXAxUrX3oFHRqaMj8="
+          }
+        },
+        "reason": {
+          "runs": [
+            {
+              "text": "The page needs to be reloaded."
+            }
+          ]
+        },
+        "subreason": {
+          "runs": [
+            {
+              "text": "The page needs to be reloaded."
+            }
+          ]
+        },
+        "thumbnail": {
+          "thumbnails": [
+            {
+              "height": 100,
+              "url": "//s.ytimg.com/yts/img/meh7-vflGevej7.png",
+              "width": 140
+            }
+          ]
+        }
+      }
+    },
+    "reason": "Video unavailable",
+    "status": "UNPLAYABLE"
+  },
+  "responseContext": {
+    "maxAgeSeconds": 0,
+    "responseId": "IhMIjcPbl9bIlwMVK196BR0amjI_",
+    "serviceTrackingParams": [
+      {
+        "params": [
+          {
+            "key": "ipcc",
+            "value": "0"
+          },
+          {
+            "key": "is_alc_surface",
+            "value": "false"
+          },
+          {
+            "key": "is_viewed_live",
+            "value": "False"
+          },
+          {
+            "key": "wh_paused",
+            "value": "0"
+          },
+          {
+            "key": "logged_in",
+            "value": "0"
+          }
+        ],
+        "service": "GFEEDBACK"
+      },
+      {
+        "params": [
+          {
+            "key": "c",
+            "value": "WEB_REMIX"
+          },
+          {
+            "key": "cver",
+            "value": "1.20260707.12.00"
+          },
+          {
+            "key": "yt_li",
+            "value": "0"
+          },
+          {
+            "key": "GetPlayer_rid",
+            "value": "0x2580b8d30b1edf6b"
+          }
+        ],
+        "service": "CSI"
+      },
+      {
+        "params": [
+          {
+            "key": "client.version",
+            "value": "1.20000101"
+          },
+          {
+            "key": "client.name",
+            "value": "WEB_REMIX"
+          }
+        ],
+        "service": "ECATCHER"
+      }
+    ]
+  },
+  "trackingParams": "CAAQu2kiEwiNw9uX1siXAxUrX3oFHRqaMj_KAQQqBzkO",
+  "videoDetails": {
+    "allowRatings": true,
+    "author": "Rick Astley",
+    "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+    "isCrawlable": true,
+    "isLiveContent": false,
+    "isOwnerViewing": false,
+    "isPrivate": false,
+    "isTvfilmVideo": false,
+    "isUnpluggedCorpus": false,
+    "lengthSeconds": "213",
+    "musicVideoType": "MUSIC_VIDEO_TYPE_OMV",
+    "thumbnail": {
+      "thumbnails": [
+        {
+          "height": 225,
+          "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AOn4CLCC9_50-84w_LWeEyjJM1HgdVBuTw",
+          "width": 400
+        },
+        {
+          "height": 450,
+          "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AOn4CLAqhifC3SlIXC6pkOGx3njrNElp2g",
+          "width": 800
+        },
+        {
+          "height": 480,
+          "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hq720.jpg?sqp=-oaymwEXCNUGEOADIAQqCwjVARCqCBh4INgESFo&rs=AOn4CLBX-HcaMSEAucUr5J0qD5nEyiPAoQ",
+          "width": 853
+        }
+      ]
+    },
+    "title": "Never Gonna Give You Up",
+    "videoId": "dQw4w9WgXcQ",
+    "viewCount": "1828572859"
+  }
+}

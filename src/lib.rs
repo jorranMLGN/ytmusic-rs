@@ -21,6 +21,6 @@ pub mod web;
 pub use client::YtMusic;
 pub use context::Client;
 pub use models::*;
-pub use player::SignInRequired;
+pub use player::{SignInRequired, is_music_video};
 pub use potoken::Minter;
 pub use stream::AudioStream;

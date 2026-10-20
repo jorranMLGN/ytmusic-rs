@@ -276,6 +276,82 @@ impl YtMusic {
             .with_context(|| format!("the guest video failed too ({refused:#})"))
     }
 
+    /// The video-only stream of `video_id` to show, already arriving.
+    ///
+    /// The tallest H.264 format no taller than `max_height`, or the lowest one when every format
+    /// is taller. The order is that of [`open_audio`](Self::open_audio): the guest client first,
+    /// checked by its first range, then the signed-in client. The stream renews its url by itag,
+    /// and [`AudioStream::resumed`] restarts it at a seek target like audio.
+    pub async fn open_video(
+        self: &Arc<Self>,
+        video_id: &str,
+        max_height: u32,
+    ) -> Result<(VideoFormat, AudioStream)> {
+        let refused = match self.guest_video(video_id).await {
+            Ok(formats) => match self.open_picked(video_id, &formats, max_height).await {
+                Ok(opened) => return Ok(opened),
+                Err(error) => error,
+            },
+            Err(error) => error,
+        };
+        log::debug!("player: the guest video for {video_id} failed ({refused:#})");
+        let token = self.po_token().await;
+        let formats = self
+            .signed_videos(video_id, &token)
+            .await
+            .with_context(|| format!("the guest video failed too ({refused:#})"))?;
+        self.open_picked(video_id, &formats, max_height).await
+    }
+
+    /// Opens the format of `formats` that [`tallest_under`] picks, renewing by its itag.
+    async fn open_picked(
+        self: &Arc<Self>,
+        video_id: &str,
+        formats: &[VideoFormat],
+        max_height: u32,
+    ) -> Result<(VideoFormat, AudioStream)> {
+        let format = tallest_under(formats, max_height)
+            .with_context(|| format!("no h264 stream for {video_id}"))?
+            .clone();
+        let stream = AudioStream::open_url(
+            self.http.clone(),
+            format.url.clone(),
+            format.user_agent,
+            format.content_length,
+        )
+        .await
+        .with_context(|| format!("video itag {} is not being served", format.itag))?;
+        let stream = stream.renewing_video(self, video_id, format.itag);
+        Ok((format, stream))
+    }
+
+    /// A fresh url for the video `itag` of `video_id`, carrying a minted proof-of-origin token.
+    ///
+    /// The video counterpart of [`renewed_audio`](Self::renewed_audio), with the same waiting and
+    /// the same failure when the player no longer offers that itag.
+    pub(crate) async fn renewed_video(&self, video_id: &str, itag: u32) -> Result<VideoFormat> {
+        let binding = self
+            .session_binding()
+            .await
+            .context("no session binding to mint a token for")?;
+        let token = self
+            .po_tokens
+            .await_minted(&binding)
+            .await
+            .context("no proof-of-origin token was minted in time")?;
+        let formats = self.signed_videos(video_id, &token).await?;
+        renewal_format(&formats, itag)
+            .cloned()
+            .with_context(|| format!("itag {itag} is no longer offered for {video_id}"))
+    }
+
+    /// The `videoDetails.musicVideoType` of `video_id`, e.g. `MUSIC_VIDEO_TYPE_OMV`, read from
+    /// a Music-client player response. `None` when the response does not carry one.
+    pub async fn music_video_type(&self, video_id: &str) -> Result<Option<String>> {
+        let response = self.player_response(video_id, Client::Music).await?;
+        Ok(music_video_type_of(&response))
+    }
+
     async fn guest_video(&self, video_id: &str) -> Result<Vec<VideoFormat>> {
         let response = self.guest_player(video_id).await?;
         let formats = playable(&response, video_id)?
@@ -287,15 +363,21 @@ impl YtMusic {
 
     async fn signed_video(&self, video_id: &str) -> Result<Vec<VideoFormat>> {
         let token = self.po_token().await;
+        self.signed_videos(video_id, &token).await
+    }
+
+    /// The signed-in client's H.264 streams for `video_id`, lowest first, with `token` on the
+    /// request and on every url.
+    async fn signed_videos(&self, video_id: &str, token: &str) -> Result<Vec<VideoFormat>> {
         let solver = self.solver().await?;
-        let response = self.signed_player(video_id, &token, &solver, false).await?;
+        let response = self.signed_player(video_id, token, &solver, false).await?;
         let mut formats = Vec::new();
         for raw in playable(&response, video_id)? {
             let Some(held) = ciphered(raw, is_video) else {
                 continue;
             };
             let url = decipher(&solver, &held).await?;
-            let url = with_pot(&url, &token);
+            let url = with_pot(&url, token);
             if let Some(format) = video_parts(raw, url, Client::Music) {
                 formats.push(format);
             }
@@ -653,6 +735,34 @@ fn h264(mut formats: Vec<VideoFormat>) -> Option<Vec<VideoFormat>> {
     (!formats.is_empty()).then_some(formats)
 }
 
+/// The tallest of `formats` no taller than `max_height`, or the lowest one when all are taller.
+fn tallest_under(formats: &[VideoFormat], max_height: u32) -> Option<&VideoFormat> {
+    formats
+        .iter()
+        .filter(|format| format.height <= max_height)
+        .max_by_key(|format| format.height)
+        .or_else(|| formats.iter().min_by_key(|format| format.height))
+}
+
+/// The entry of `formats` with this `itag`, the only file a renewed url may point at.
+fn renewal_format(formats: &[VideoFormat], itag: u32) -> Option<&VideoFormat> {
+    formats.iter().find(|format| format.itag == itag)
+}
+
+/// `videoDetails.musicVideoType` of a player response.
+fn music_video_type_of(response: &Value) -> Option<String> {
+    response
+        .pointer("/videoDetails/musicVideoType")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// Whether a `musicVideoType` is a video worth showing: an official music video or user
+/// generated content. Audio tracks (`ATV`) and anything unknown are not.
+pub fn is_music_video(kind: &str) -> bool {
+    matches!(kind, "MUSIC_VIDEO_TYPE_OMV" | "MUSIC_VIDEO_TYPE_UGC")
+}
+
 /// A `{ "start": "0", "end": "741" }` byte range as the player response spells it, with the
 /// numbers as strings. The end is inclusive there and exclusive in the result.
 fn byte_range(format: &Value, key: &str) -> Option<Range<u64>> {
@@ -829,6 +939,73 @@ mod tests {
             "/tests/fixtures/web/player_web.json"
         );
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_string_pretty(&response).unwrap()).unwrap();
+    }
+
+    /// The H.264 formats of the recorded guest response, lowest first.
+    fn video_fixture() -> Vec<VideoFormat> {
+        let formats = fixture()
+            .iter()
+            .filter_map(|format| video_format(format, Client::VisionOs))
+            .collect();
+        h264(formats).unwrap()
+    }
+
+    #[test]
+    fn open_video_picks_the_tallest_format_under_the_cap() {
+        let formats = video_fixture();
+        assert_eq!(tallest_under(&formats, 480).unwrap().height, 480);
+        assert_eq!(tallest_under(&formats, 1080).unwrap().height, 1080);
+        assert_eq!(
+            tallest_under(&formats, 100).unwrap().height,
+            formats[0].height
+        );
+        assert!(tallest_under(&[], 480).is_none());
+    }
+
+    #[test]
+    fn a_refused_video_stream_renews_by_its_itag() {
+        let formats = video_fixture();
+        let wanted = formats[2].itag;
+        assert_eq!(renewal_format(&formats, wanted).unwrap().itag, wanted);
+        assert!(renewal_format(&formats, 1).is_none());
+    }
+
+    #[test]
+    fn music_video_types_classify() {
+        assert!(is_music_video("MUSIC_VIDEO_TYPE_OMV"));
+        assert!(is_music_video("MUSIC_VIDEO_TYPE_UGC"));
+        assert!(!is_music_video("MUSIC_VIDEO_TYPE_ATV"));
+        assert!(!is_music_video(""));
+    }
+
+    #[test]
+    fn the_music_video_type_is_read_from_a_player_response() {
+        let response: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/web/player_music_omv.json"))
+                .unwrap();
+        let kind = music_video_type_of(&response);
+        assert_eq!(kind.as_deref(), Some("MUSIC_VIDEO_TYPE_OMV"));
+        assert!(is_music_video(kind.as_deref().unwrap()));
+        assert_eq!(music_video_type_of(&json!({})), None);
+    }
+
+    /// Records the guest Music-client `player` response of an official music video into the
+    /// fixture the music video type test reads. Live and read-only, so it is ignored and run by
+    /// exact name.
+    #[tokio::test]
+    #[ignore]
+    async fn record_music_player_fixture() {
+        let api = YtMusic::anonymous();
+        let mut response = api
+            .player_response("dQw4w9WgXcQ", Client::Music)
+            .await
+            .unwrap();
+        scrub(&mut response);
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/web/player_music_omv.json"
+        );
         std::fs::write(path, serde_json::to_string_pretty(&response).unwrap()).unwrap();
     }
 
