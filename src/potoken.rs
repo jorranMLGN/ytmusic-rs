@@ -1,8 +1,9 @@
 //! Proof-of-origin tokens, the parameter YouTube asks for before it serves a stream.
 //!
 //! A token is bound to one identifier and refused against any other. For `WEB_REMIX` that
-//! identifier is the session: the account's data sync id when signed in, and the visitor id
-//! otherwise, so one token covers every track of a run. Minting one takes a browser, because
+//! identifier is the video id while YouTube Music runs its content binding experiment, so every
+//! track needs a token of its own. Without the experiment it is the session: the account's data
+//! sync id when signed in, and the visitor id otherwise. Minting one takes a browser, because
 //! Google's BotGuard virtual machine attests the runtime it is in and a hand-written
 //! environment does not pass. That is why the real minter lives outside this crate behind
 //! [`Minter`], and why a host without one still gets [`cold_start`], which YouTube honours
@@ -112,7 +113,9 @@ impl PoTokens {
                 return None;
             }
         };
-        self.kept.write().await.insert(
+        let mut kept = self.kept.write().await;
+        kept.retain(|_, kept| kept.minted.elapsed() < KEEP);
+        kept.insert(
             binding.to_string(),
             Kept {
                 token: token.clone(),

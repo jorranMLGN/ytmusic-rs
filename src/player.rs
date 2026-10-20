@@ -68,11 +68,11 @@ impl YtMusic {
             .await
     }
 
-    /// The proof-of-origin token the signed-in client sends, bound to this session rather
-    /// than to one track, which is what YouTube expects from `WEB_REMIX`. Empty when the
-    /// binding cannot be worked out: a token for the wrong identity is worse than none.
-    async fn po_token(&self) -> String {
-        let Some(binding) = self.session_binding().await else {
+    /// The proof-of-origin token the signed-in client puts on the stream url of `video_id`,
+    /// bound as [`stream_binding`](YtMusic::stream_binding) says. Empty when the binding cannot
+    /// be worked out, since a token for the wrong identity is worse than none.
+    async fn po_token(&self, video_id: &str) -> String {
+        let Some(binding) = self.stream_binding(video_id).await else {
             log::warn!("potoken: no session binding, the stream goes out without a token");
             return String::new();
         };
@@ -174,7 +174,7 @@ impl YtMusic {
     /// offers that itag, since a different file cannot carry on from the same byte.
     pub(crate) async fn renewed_audio(&self, video_id: &str, itag: u32) -> Result<AudioFormat> {
         let binding = self
-            .session_binding()
+            .stream_binding(video_id)
             .await
             .context("no session binding to mint a token for")?;
         let token = self
@@ -228,13 +228,13 @@ impl YtMusic {
     }
 
     async fn signed_audio(&self, video_id: &str, ceiling: Option<u32>) -> Result<AudioFormat> {
-        let token = self.po_token().await;
+        let token = self.po_token(video_id).await;
         self.signed_format(video_id, &token, Choice::Within(ceiling))
             .await
     }
 
-    /// The signed-in client's stream for `video_id`, with `token` on both the player request and
-    /// the url, chosen as `choice` says.
+    /// The signed-in client's stream for `video_id` with `token` on its url, chosen as `choice`
+    /// says. The player request itself carries no token, as yt-dlp sends none for `WEB_REMIX`.
     async fn signed_format(
         &self,
         video_id: &str,
@@ -253,7 +253,6 @@ impl YtMusic {
             "contentCheckOk": true,
             "racyCheckOk": true,
             "cpn": random_string(16),
-            "serviceIntegrityDimensions": { "poToken": token },
             "playbackContext": {
                 "contentPlaybackContext": {
                     "html5Preference": "HTML5_PREF_WANTS",
