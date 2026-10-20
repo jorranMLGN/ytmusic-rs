@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use serde_json::{Value, json};
 
 use super::parse;
-use super::{Channel, ChannelPage, PlaylistPage, Video, WebPlaylist, WebSearch};
+use super::{Channel, ChannelPage, PlaylistPage, Shelf, Video, WebPlaylist, WebSearch};
 use crate::client::YtMusic;
 use crate::context::Client;
 
@@ -79,6 +79,37 @@ impl YtMusic {
             )
             .await?;
         Ok(parse::library_playlists(&response))
+    }
+
+    /// The signed-in account's home feed as shelves. Empty for a guest, without a request: a
+    /// guest feed carries no videos, only a nudge to sign in.
+    pub async fn web_home(&self) -> Result<Vec<Shelf>> {
+        if !self.is_authenticated() {
+            return Ok(Vec::new());
+        }
+        let response = self
+            .execute(
+                "browse",
+                Client::Web,
+                json!({ "browseId": "FEwhat_to_watch" }),
+            )
+            .await?;
+        Ok(parse::home(&response))
+    }
+
+    /// The videos YouTube suggests beside a video, without the video itself.
+    pub async fn web_related(&self, video_id: &str) -> Result<Vec<Video>> {
+        let response = self
+            .execute("next", Client::Web, json!({ "videoId": video_id }))
+            .await?;
+        Ok(parse::related(&response))
+    }
+
+    /// A video's title, channel, length and thumbnails, read from its player response. Fails
+    /// for a live stream, which has no length.
+    pub async fn web_video(&self, video_id: &str) -> Result<Video> {
+        let response = self.guest_player(video_id).await?;
+        parse::video_details(&response).with_context(|| format!("cannot read video {video_id}"))
     }
 
     /// Subscribes to or unsubscribes from a channel. Needs a signed-in account.
@@ -178,11 +209,43 @@ mod tests {
         // is why `web_library_playlists` returns early for a guest.
     }
 
+    /// Records the guest `next` response of a video and a guest browse of the home feed. Live
+    /// and read-only, so it is ignored and run by exact name. A guest home that errors is
+    /// reported and not written.
+    #[tokio::test]
+    #[ignore]
+    async fn record_home_and_related_fixtures() {
+        let api = YtMusic::anonymous();
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/web");
+        let write = |name: &str, mut response: Value| {
+            scrub(&mut response);
+            let text = serde_json::to_string_pretty(&response).unwrap();
+            std::fs::write(format!("{dir}/{name}.json"), text).unwrap();
+        };
+        let next = api
+            .execute("next", Client::Web, json!({ "videoId": "dQw4w9WgXcQ" }))
+            .await
+            .unwrap();
+        write("next", next);
+        match api
+            .execute(
+                "browse",
+                Client::Web,
+                json!({ "browseId": "FEwhat_to_watch" }),
+            )
+            .await
+        {
+            Ok(home) => write("home_guest", home),
+            Err(error) => eprintln!("guest home failed: {error:#}"),
+        }
+    }
+
     #[tokio::test]
     async fn a_guest_library_is_empty_without_a_request() {
         let api = YtMusic::anonymous();
         assert!(api.web_library_playlists().await.unwrap().is_empty());
         assert!(api.web_subscriptions().await.unwrap().is_empty());
+        assert!(api.web_home().await.unwrap().is_empty());
     }
 
     #[test]

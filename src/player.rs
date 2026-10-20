@@ -303,7 +303,7 @@ impl YtMusic {
         h264(formats).with_context(|| format!("no addressable h264 stream for {video_id}"))
     }
 
-    async fn guest_player(&self, video_id: &str) -> Result<Value> {
+    pub(crate) async fn guest_player(&self, video_id: &str) -> Result<Value> {
         let response = self.guest_request(video_id, None).await?;
         if playability(&response).status != "LOGIN_REQUIRED" {
             return Ok(response);

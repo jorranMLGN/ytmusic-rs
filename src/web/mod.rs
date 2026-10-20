@@ -71,3 +71,10 @@ pub struct PlaylistPage {
     pub videos: Vec<Video>,
     pub continuation: Option<String>,
 }
+
+/// A titled row of videos on the home feed. The title is empty for a feed that has no shelves.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Shelf {
+    pub title: String,
+    pub videos: Vec<Video>,
+}

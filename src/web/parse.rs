@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{Channel, ChannelPage, ChannelRef, PlaylistPage, Video, WebPlaylist, WebSearch};
+use super::{Channel, ChannelPage, ChannelRef, PlaylistPage, Shelf, Video, WebPlaylist, WebSearch};
 use crate::models::Thumbnail;
 use crate::nav::{Nav as _, find_all};
 use crate::parse::{find_renderers, runs_text, thumbnails};
@@ -211,6 +211,96 @@ pub(super) fn videos_tab_params(response: &Value) -> Option<String> {
         })
         .and_then(|tab| tab.str_at(&["endpoint", "browseEndpoint", "params"]))
         .map(str::to_string)
+}
+
+/// Reads a `FEwhat_to_watch` browse response into shelves of videos. Titled shelves keep their
+/// title, and loose cards of a plain grid are gathered into a shelf with an empty title. A
+/// guest feed holds no videos, so this is empty for one.
+pub fn home(response: &Value) -> Vec<Shelf> {
+    let Some(grid) = find_renderers(response, "richGridRenderer")
+        .into_iter()
+        .next()
+    else {
+        return Vec::new();
+    };
+    let mut shelves = Vec::new();
+    let mut loose = Vec::new();
+    let flush = |loose: &mut Vec<Video>, shelves: &mut Vec<Shelf>| {
+        if !loose.is_empty() {
+            shelves.push(Shelf {
+                title: String::new(),
+                videos: std::mem::take(loose),
+            });
+        }
+    };
+    for item in grid.items(&["contents"]) {
+        match find_renderers(item, "richShelfRenderer").into_iter().next() {
+            Some(shelf) => {
+                flush(&mut loose, &mut shelves);
+                let videos = items_videos(shelf.items(&["contents"]));
+                if !videos.is_empty() {
+                    shelves.push(Shelf {
+                        title: shelf.run_text(&["title"]).unwrap_or_default(),
+                        videos,
+                    });
+                }
+            }
+            None => loose.extend(card_video(item)),
+        }
+    }
+    flush(&mut loose, &mut shelves);
+    shelves
+}
+
+/// The videos beside a `next` response's player, in order, without the one playing. Cards
+/// without a length (live, upcoming, mixes) are left out.
+pub fn related(response: &Value) -> Vec<Video> {
+    let playing = response.str_at(&["currentVideoEndpoint", "watchEndpoint", "videoId"]);
+    let mut videos: Vec<Video> = Vec::new();
+    for results in find_renderers(response, "secondaryResults") {
+        let list = match results.at(&["results"]) {
+            Some(_) => results.items(&["results"]),
+            None => results.items(&["secondaryResults", "results"]),
+        };
+        for item in list {
+            let video = card_video(item).or_else(|| {
+                find_renderers(item, "compactVideoRenderer")
+                    .into_iter()
+                    .next()
+                    .and_then(video_renderer)
+            });
+            if let Some(video) = video
+                && Some(video.id.as_str()) != playing
+                && !videos.iter().any(|seen| seen.id == video.id)
+            {
+                videos.push(video);
+            }
+        }
+    }
+    videos
+}
+
+/// The video a player response's `videoDetails` describes. `None` for a live stream or any
+/// video that has no length, or when the details lack an id, title or channel.
+pub fn video_details(response: &Value) -> Option<Video> {
+    let details = response.at(&["videoDetails"])?;
+    let seconds: u64 = details.str_at(&["lengthSeconds"])?.parse().ok()?;
+    let length = Duration::from_secs(seconds);
+    if length.is_zero() {
+        return None;
+    }
+    Some(Video {
+        id: details.str_at(&["videoId"])?.to_string(),
+        title: details.str_at(&["title"])?.to_string(),
+        channel: Some(ChannelRef {
+            id: details.str_at(&["channelId"])?.to_string(),
+            name: details.str_at(&["author"])?.to_string(),
+        }),
+        duration: Some(length),
+        thumbnails: clean(thumbnails(
+            details.at(&["thumbnail"]).unwrap_or(&Value::Null),
+        )),
+    })
 }
 
 /// The browse id a response echoes in its tracking params, such as `VLWL`.
@@ -752,5 +842,86 @@ mod tests {
         let response = fixture("signed_out_library.json");
         assert!(subscriptions(&response).is_empty());
         assert!(library_playlists(&response).is_empty());
+    }
+
+    /// `home.json` is SYNTHETIC: a signed-in feed written by hand from the real WEB shapes
+    /// (richGridRenderer, richItemRenderer, richSectionRenderer, richShelfRenderer, lockup and
+    /// video cards), with placeholder ids, titles and channels. A recording carries the
+    /// account's own taste. `home_guest.json` is a real guest recording.
+    #[test]
+    fn the_home_feed_parses_to_shelves_of_videos() {
+        let shelves = home(&fixture("home.json"));
+        assert!(shelves.len() >= 2, "{shelves:?}");
+        assert!(shelves.iter().all(|shelf| !shelf.videos.is_empty()));
+        assert!(
+            shelves
+                .iter()
+                .flat_map(|shelf| &shelf.videos)
+                .all(|video| video.id.len() == 11 && video.duration.is_some())
+        );
+        assert!(shelves.iter().any(|shelf| shelf.title == "Shelf B"));
+    }
+
+    #[test]
+    fn a_plain_grid_becomes_one_untitled_shelf() {
+        let grid = json!({ "richGridRenderer": { "contents": [
+            { "richItemRenderer": { "content": { "videoRenderer": {
+                "videoId": "aaaaaaaaaaa", "title": { "runs": [{ "text": "A" }] },
+                "lengthText": { "simpleText": "1:00" },
+                "thumbnail": { "thumbnails": [{ "url": "https://x/a.jpg", "width": 1, "height": 1 }] }
+            } } } },
+            { "continuationItemRenderer": {} }
+        ] } });
+        let shelves = home(&grid);
+        assert_eq!(shelves.len(), 1);
+        assert_eq!(shelves[0].title, "");
+        assert_eq!(shelves[0].videos.len(), 1);
+    }
+
+    #[test]
+    fn a_guest_home_feed_holds_no_videos() {
+        assert!(home(&fixture("home_guest.json")).is_empty());
+    }
+
+    #[test]
+    fn related_videos_exclude_the_playing_one() {
+        let videos = related(&fixture("next.json"));
+        assert!(videos.len() >= 10, "{}", videos.len());
+        assert!(videos.iter().all(|video| video.id != "dQw4w9WgXcQ"));
+        assert!(videos.iter().all(|video| video.duration.is_some()));
+    }
+
+    #[test]
+    fn the_playing_video_is_dropped_from_related() {
+        let mut next = fixture("next.json");
+        let first = related(&next)[0].id.clone();
+        let endpoint = next
+            .pointer_mut("/currentVideoEndpoint/watchEndpoint/videoId")
+            .unwrap();
+        *endpoint = json!(first);
+        assert!(related(&next).iter().all(|video| video.id != first));
+    }
+
+    #[test]
+    fn video_details_carry_title_channel_and_length() {
+        let video = video_details(&fixture("player_web.json")).unwrap();
+        assert_eq!(video.id, "dQw4w9WgXcQ");
+        assert!(!video.title.is_empty());
+        assert!(video.channel.unwrap().id.starts_with("UC"));
+        let seconds = video.duration.unwrap().as_secs();
+        assert!((212..=214).contains(&seconds), "{seconds}");
+        assert!(
+            video
+                .thumbnails
+                .iter()
+                .all(|thumb| thumb.url.starts_with("https://"))
+        );
+    }
+
+    #[test]
+    fn video_details_of_a_live_stream_are_none() {
+        let live = json!({ "videoDetails": { "videoId": "aaaaaaaaaaa", "title": "T",
+            "channelId": "UCx", "author": "A", "lengthSeconds": "0", "isLive": true } });
+        assert!(video_details(&live).is_none());
     }
 }
