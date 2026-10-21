@@ -4,8 +4,9 @@
 //! saying so, but it answers a bounded `Range` request at full speed. So the body is asked for
 //! a mebibyte at a time, each read has a deadline, and a range that stalls or breaks is asked
 //! for again from the byte it stopped at. A url the host refuses partway through, which is what
-//! a cold start token gets after its first megabyte or so, is renewed with a minted token and
-//! read on from the same byte.
+//! a cold start token gets after its first megabyte or so, is renewed through the client that
+//! handed it out, with a minted token when that client needs one, and read on from the same
+//! byte.
 
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -14,6 +15,7 @@ use anyhow::{Context as _, Result, bail};
 use bytes::Bytes;
 
 use crate::client::YtMusic;
+use crate::context::Client;
 use crate::models::AudioFormat;
 
 /// How much one request asks for.
@@ -46,6 +48,8 @@ struct Renewal {
     client: Weak<YtMusic>,
     video_id: String,
     itag: u32,
+    /// The client that handed out the url.
+    from: Client,
     /// The byte the last renewal was made at. A renewed url refused at that same byte ends the
     /// stream instead of renewing forever.
     at: Option<u64>,
@@ -71,11 +75,19 @@ impl AudioStream {
     }
 
     /// Lets the stream renew its url through `client` when the host refuses it partway through.
-    pub(crate) fn renewing(mut self, client: &Arc<YtMusic>, video_id: &str, itag: u32) -> Self {
+    /// `from` is the client that handed the url out, which decides how a new one is asked for.
+    pub(crate) fn renewing(
+        mut self,
+        client: &Arc<YtMusic>,
+        video_id: &str,
+        itag: u32,
+        from: Client,
+    ) -> Self {
         self.renewal = Some(Renewal {
             client: Arc::downgrade(client),
             video_id: video_id.to_string(),
             itag,
+            from,
             at: None,
         });
         self
@@ -163,7 +175,7 @@ impl AudioStream {
             self.offset
         );
         let format = client
-            .renewed_audio(&renewal.video_id, renewal.itag)
+            .renewed_audio(&renewal.video_id, renewal.itag, renewal.from)
             .await
             .map_err(|error| refused.context(format!("cannot renew the url: {error:#}")))?;
         if format.content_length != self.total {
