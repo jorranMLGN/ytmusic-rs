@@ -13,6 +13,8 @@ use crate::stream::AudioStream;
 const CHUNK: u64 = 1024 * 1024;
 const PARALLEL: usize = 4;
 const MAX_STREAM_BYTES: u64 = 256 * 1024 * 1024;
+/// The highest frame rate `tallest_under` prefers when a height comes at more than one.
+const SMOOTH_FPS: u32 = 30;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SignInRequired;
@@ -736,12 +738,19 @@ fn h264(mut formats: Vec<VideoFormat>) -> Option<Vec<VideoFormat>> {
 }
 
 /// The tallest of `formats` no taller than `max_height`, or the lowest one when all are taller.
+/// Of one height it takes a format of at most `SMOOTH_FPS` when there is one: YouTube often
+/// offers 1080p at both 30 and 60 fps, and 60 doubles the decoding for little to see.
 fn tallest_under(formats: &[VideoFormat], max_height: u32) -> Option<&VideoFormat> {
+    let smooth = |format: &VideoFormat| format.fps <= SMOOTH_FPS;
     formats
         .iter()
         .filter(|format| format.height <= max_height)
-        .max_by_key(|format| format.height)
-        .or_else(|| formats.iter().min_by_key(|format| format.height))
+        .max_by_key(|format| (format.height, smooth(format)))
+        .or_else(|| {
+            formats
+                .iter()
+                .min_by_key(|format| (format.height, !smooth(format)))
+        })
 }
 
 /// The entry of `formats` with this `itag`, the only file a renewed url may point at.
@@ -961,6 +970,34 @@ mod tests {
             formats[0].height
         );
         assert!(tallest_under(&[], 480).is_none());
+    }
+
+    /// A copy of `format` at `height` and `fps` under its own `itag`.
+    fn variant(format: &VideoFormat, itag: u32, height: u32, fps: u32) -> VideoFormat {
+        VideoFormat {
+            itag,
+            height,
+            fps,
+            ..format.clone()
+        }
+    }
+
+    #[test]
+    fn open_video_prefers_30_fps_over_60_at_one_height() {
+        let base = &video_fixture()[0];
+        let both = [
+            variant(base, 136, 720, 30),
+            variant(base, 299, 1080, 60),
+            variant(base, 137, 1080, 30),
+        ];
+        assert_eq!(tallest_under(&both, 1080).unwrap().itag, 137);
+        let reversed = [both[2].clone(), both[1].clone()];
+        assert_eq!(tallest_under(&reversed, 1080).unwrap().itag, 137);
+        // a taller format still wins over a smoother shorter one
+        let only_60 = [variant(base, 136, 720, 30), variant(base, 299, 1080, 60)];
+        assert_eq!(tallest_under(&only_60, 1080).unwrap().itag, 299);
+        // and when every format is taller than the cap, the lowest prefers 30 fps too
+        assert_eq!(tallest_under(&both[1..], 480).unwrap().itag, 137);
     }
 
     #[test]
