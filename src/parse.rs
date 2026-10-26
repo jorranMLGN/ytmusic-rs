@@ -138,13 +138,15 @@ pub fn list_item_track(item: &Value) -> Option<Track> {
         .first()
         .and_then(|column| column.run_text(&["musicResponsiveListItemFixedColumnRenderer", "text"]))
         .or_else(|| {
-            columns.iter().skip(1).find_map(|column| {
+            // the length ends the subtitle, after an album title that may look like one ("4:44")
+            columns.iter().skip(1).rev().find_map(|column| {
                 column
                     .runs(&["text"])
                     .iter()
                     .filter_map(|run| run.str_at(&["text"]))
+                    .rev()
                     .find(|text| {
-                        !text.is_empty() && text.chars().all(|c| c.is_ascii_digit() || c == ':')
+                        text.contains(':') && text.chars().all(|c| c.is_ascii_digit() || c == ':')
                     })
                     .map(str::to_string)
             })

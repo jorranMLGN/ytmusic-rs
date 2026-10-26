@@ -27,6 +27,26 @@ impl std::fmt::Display for SignInRequired {
 
 impl std::error::Error for SignInRequired {}
 
+/// The streams only a Premium account is offered: 256 kbps AAC and Opus.
+const PREMIUM: [u32; 2] = [141, 774];
+
+/// What an embed page hands its player: the host flags and the visitor they were issued to.
+struct EmbedPage {
+    flags: String,
+    visitor: String,
+}
+
+/// Which of a client's deciphered streams to take.
+#[derive(Clone, Copy, Debug)]
+enum Choice {
+    /// Exactly this itag, as when a stream already playing needs a fresh url.
+    Itag(u32),
+    /// The best of the [`PREMIUM`] streams, and none when the account is offered none.
+    Premium,
+    /// The best stream at or below this many bits per second, as [`choose`] picks it.
+    Within(Option<u32>),
+}
+
 #[derive(Clone, Debug)]
 pub struct Playability {
     pub status: String,
@@ -69,11 +89,11 @@ impl YtMusic {
             .await
     }
 
-    /// The proof-of-origin token the signed-in client sends, bound to this session rather
-    /// than to one track, which is what YouTube expects from `WEB_REMIX`. Empty when the
-    /// binding cannot be worked out: a token for the wrong identity is worse than none.
-    async fn po_token(&self) -> String {
-        let Some(binding) = self.session_binding().await else {
+    /// The proof-of-origin token the signed-in client puts on the stream url of `video_id`,
+    /// bound as [`stream_binding`](YtMusic::stream_binding) says. Empty when the binding cannot
+    /// be worked out, since a token for the wrong identity is worse than none.
+    async fn po_token(&self, video_id: &str) -> String {
+        let Some(binding) = self.stream_binding(video_id).await else {
             log::warn!("potoken: no session binding, the stream goes out without a token");
             return String::new();
         };
@@ -82,65 +102,140 @@ impl YtMusic {
 
     /// The stream to play `video_id` from.
     ///
-    /// The guest client is asked first because its urls need no deciphering, and the url it
-    /// hands back is checked before a track commits to it: a player response can name a
-    /// stream the host then refuses, which is what an address YouTube has flagged looks like.
-    /// Either failure falls through to the signed-in client, whose url carries a
-    /// proof-of-origin token. That path works for a guest too, so a run without an account
-    /// still gets the second try.
+    /// The guest client is asked first because its urls need no deciphering, then the embedded
+    /// player, which YouTube serves without a proof-of-origin token. Each url is checked before a
+    /// track commits to it: a player response can name a stream the host then refuses, which is
+    /// what an address YouTube has flagged looks like. The signed-in client comes last, since its
+    /// url needs a minted token and minting opens a browser page.
     pub async fn best_audio(&self, video_id: &str) -> Result<AudioFormat> {
-        let refused = match self.guest_audio(video_id).await {
-            Ok(format) => match self.serves(&format).await {
-                true => return Ok(format),
-                false => anyhow::anyhow!("the stream host refused the guest url"),
-            },
-            Err(error) => error,
-        };
-        log::debug!("player: the guest stream for {video_id} failed ({refused:#})");
-        self.signed_audio(video_id)
+        let mut refusals = Vec::new();
+        for client in [Client::VisionOs, Client::Embedded] {
+            let found = match client {
+                Client::VisionOs => self.guest_audio(video_id, None).await,
+                _ => self.embedded_audio(video_id, Choice::Within(None)).await,
+            };
+            match found {
+                Ok(format) => match self.serves(&format).await {
+                    true => return Ok(format),
+                    false => {
+                        refusals.push(format!("the stream host refused the {} url", client.name()))
+                    }
+                },
+                Err(error) => refusals.push(format!("{error:#}")),
+            }
+        }
+        let refused = refusals.join(", ");
+        log::debug!("player: the tokenless streams for {video_id} failed ({refused})");
+        self.signed_audio(video_id, Choice::Within(None))
             .await
-            .with_context(|| format!("the guest stream failed too ({refused:#})"))
+            .with_context(|| format!("the tokenless streams failed too ({refused})"))
     }
 
-    /// The stream to play `video_id` from, already arriving.
+    /// The best stream to play `video_id` from, already arriving, chosen as
+    /// [`open_audio_within`](Self::open_audio_within) chooses with no ceiling.
     ///
-    /// The same order as [`best_audio`](Self::best_audio), guest first and signed second, but
-    /// the first range of the body is what checks the url rather than a probe of its own, so
-    /// a track that plays costs no round trip beyond the download. The stream holds the client
-    /// weakly, so a url the host stops serving partway through can be renewed.
+    /// Unlike [`best_audio`](Self::best_audio), the first range of the body is what checks the
+    /// url rather than a probe of its own, so a track that plays costs no round trip beyond the
+    /// download. The stream holds the client weakly, so a url the host stops serving partway
+    /// through can be renewed.
     pub async fn open_audio(
         self: &Arc<Self>,
         video_id: &str,
     ) -> Result<(AudioFormat, AudioStream)> {
-        let refused = match self.guest_audio(video_id).await {
-            Ok(format) => match AudioStream::open(self.http.clone(), &format).await {
-                Ok(stream) => {
-                    let stream = stream.renewing(self, video_id, format.itag);
-                    return Ok((format, stream));
+        self.open_audio_within(video_id, None).await
+    }
+
+    /// The stream to play `video_id` from, already arriving, at no more than `ceiling` bits
+    /// per second. A track whose every stream is above the ceiling plays its lowest one.
+    ///
+    /// `None` takes the best there is. For a signed-in session that first asks the signed-in
+    /// client for a Premium stream, the 256 kbps one only it offers. Then come the guest client
+    /// and the embedded player, which need no proof-of-origin token, and the signed-in client
+    /// with a minted token last.
+    pub async fn open_audio_within(
+        self: &Arc<Self>,
+        video_id: &str,
+        ceiling: Option<u32>,
+    ) -> Result<(AudioFormat, AudioStream)> {
+        if ceiling.is_none() && self.is_cookie_auth() {
+            match self.open_signed(video_id, Choice::Premium).await {
+                Ok(opened) => return Ok(opened),
+                Err(error) => {
+                    log::debug!("player: no premium stream for {video_id} ({error:#})")
                 }
-                Err(error) => error.context(format!("itag {} is not being served", format.itag)),
-            },
-            Err(error) => error,
-        };
-        log::debug!("player: the guest stream for {video_id} failed ({refused:#})");
-        let format = self
-            .signed_audio(video_id)
+            }
+        }
+        let mut refusals = Vec::new();
+        for client in [Client::VisionOs, Client::Embedded] {
+            let found = match client {
+                Client::VisionOs => self.guest_audio(video_id, ceiling).await,
+                _ => self.embedded_audio(video_id, Choice::Within(ceiling)).await,
+            };
+            let opened = match found {
+                Ok(format) => self.open_format(video_id, format, client).await,
+                Err(error) => Err(error),
+            };
+            match opened {
+                Ok(opened) => return Ok(opened),
+                Err(error) => {
+                    log::debug!(
+                        "player: the {} stream for {video_id} failed ({error:#})",
+                        client.name()
+                    );
+                    refusals.push(format!("{error:#}"));
+                }
+            }
+        }
+        let refused = refusals.join(", ");
+        self.open_signed(video_id, Choice::Within(ceiling))
             .await
-            .with_context(|| format!("the guest stream failed too ({refused:#})"))?;
-        let stream = AudioStream::open(self.http.clone(), &format).await?;
-        let stream = stream.renewing(self, video_id, format.itag);
+            .with_context(|| format!("the tokenless streams failed too ({refused})"))
+    }
+
+    /// The signed-in client's stream for `video_id` as `choice` picks it, already arriving.
+    async fn open_signed(
+        self: &Arc<Self>,
+        video_id: &str,
+        choice: Choice,
+    ) -> Result<(AudioFormat, AudioStream)> {
+        let format = self.signed_audio(video_id, choice).await?;
+        self.open_format(video_id, format, Client::Music).await
+    }
+
+    /// Starts the body of `format`, which `client` handed out, and lets it renew through the
+    /// same client.
+    async fn open_format(
+        self: &Arc<Self>,
+        video_id: &str,
+        format: AudioFormat,
+        client: Client,
+    ) -> Result<(AudioFormat, AudioStream)> {
+        let stream = AudioStream::open(self.http.clone(), &format)
+            .await
+            .with_context(|| format!("itag {} is not being served", format.itag))?;
+        let stream = stream.renewing(self, video_id, format.itag, client);
         Ok((format, stream))
     }
 
-    /// A fresh url for the `itag` stream of `video_id`, carrying a minted proof-of-origin token.
+    /// A fresh url for the `itag` stream of `video_id`, for a stream the host stopped serving
+    /// partway through.
     ///
-    /// This is for a stream the host stopped serving partway through, which is what happens to a
-    /// cold start token after its first megabyte or so. It waits for the minter instead of sending
-    /// another cold start token. It fails when no token arrives in time or the player no longer
-    /// offers that itag, since a different file cannot carry on from the same byte.
-    pub(crate) async fn renewed_audio(&self, video_id: &str, itag: u32) -> Result<AudioFormat> {
+    /// A stream from the embedded player asks it again, since its urls need no token. Any other
+    /// stream was most likely refused for its cold start token after its first megabyte, so it
+    /// waits for a minted token and asks the signed-in client. It fails when no token arrives in
+    /// time or the player no longer offers that itag, since a different file cannot carry on
+    /// from the same byte.
+    pub(crate) async fn renewed_audio(
+        &self,
+        video_id: &str,
+        itag: u32,
+        from: Client,
+    ) -> Result<AudioFormat> {
+        if from == Client::Embedded {
+            return self.embedded_audio(video_id, Choice::Itag(itag)).await;
+        }
         let binding = self
-            .session_binding()
+            .stream_binding(video_id)
             .await
             .context("no session binding to mint a token for")?;
         let token = self
@@ -148,7 +243,8 @@ impl YtMusic {
             .await_minted(&binding)
             .await
             .context("no proof-of-origin token was minted in time")?;
-        self.signed_format(video_id, &token, Some(itag)).await
+        let (chosen, solver) = self.signed_streams(video_id, Choice::Itag(itag)).await?;
+        signed(chosen, &solver, &token).await
     }
 
     /// Whether the stream host will serve this url, asked with the smallest range there is.
@@ -177,55 +273,129 @@ impl YtMusic {
         Ok((format, data))
     }
 
-    async fn guest_audio(&self, video_id: &str) -> Result<AudioFormat> {
+    async fn guest_audio(&self, video_id: &str, ceiling: Option<u32>) -> Result<AudioFormat> {
         let response = self.guest_player(video_id).await?;
-        let audio = playable(&response, video_id)?
+        let audio: Vec<AudioFormat> = playable(&response, video_id)?
             .iter()
             .filter_map(|format| audio_format(format, Client::VisionOs))
             .collect();
-        pick(audio).with_context(|| format!("no direct audio stream for {video_id}"))
+        log::debug!(
+            "player: {} offers {video_id} as {}",
+            Client::VisionOs.name(),
+            offered(audio.iter().map(|format| (format.itag, format.bitrate)))
+        );
+        choose(audio, ceiling, |format| (&format.mime, format.bitrate))
+            .with_context(|| format!("no direct audio stream for {video_id}"))
     }
 
-    async fn signed_audio(&self, video_id: &str) -> Result<AudioFormat> {
-        let token = self.po_token().await;
-        self.signed_format(video_id, &token, None).await
+    /// The embedded player's stream for `video_id`, asked as a guest. Its urls go out without a
+    /// proof-of-origin token, which YouTube does not ask of this client.
+    async fn embedded_audio(&self, video_id: &str, choice: Choice) -> Result<AudioFormat> {
+        let (chosen, solver) = self
+            .ciphered_streams(video_id, Client::Embedded, choice)
+            .await?;
+        let url = decipher(&solver, &chosen).await?;
+        Ok(chosen.into_format(url, Client::Embedded))
     }
 
-    /// The signed-in client's stream for `video_id`, with `token` on both the player request and
-    /// the url. Takes `itag` when one is given and the best AAC stream otherwise.
-    async fn signed_format(
+    /// The signed-in client's stream for `video_id` as `choice` picks it. A Premium stream goes
+    /// out on a cold start token without asking the minter, because YouTube does not hold
+    /// Premium streams to a proof-of-origin token, and a renewal mints one if it turns out to.
+    /// Any other stream asks the minter for the token its url needs.
+    async fn signed_audio(&self, video_id: &str, choice: Choice) -> Result<AudioFormat> {
+        let (chosen, solver) = self.signed_streams(video_id, choice).await?;
+        let token = match PREMIUM.contains(&chosen.itag) {
+            true => self
+                .stream_binding(video_id)
+                .await
+                .map(|binding| crate::potoken::cold_start(&binding))
+                .unwrap_or_default(),
+            false => self.po_token(video_id).await,
+        };
+        signed(chosen, &solver, &token).await
+    }
+
+    /// The signed-in client's stream for `video_id`, chosen as `choice` says, and the solver
+    /// that deciphers it.
+    async fn signed_streams(
         &self,
         video_id: &str,
-        token: &str,
-        itag: Option<u32>,
-    ) -> Result<AudioFormat> {
+        choice: Choice,
+    ) -> Result<(Ciphered, Arc<crate::deobf::Solver>)> {
+        self.ciphered_streams(video_id, Client::Music, choice).await
+    }
+
+    /// Asks `client` for the streams of `video_id` and picks one as `choice` says. The signed-in
+    /// client is asked with the session's cookies and the embedded player as a guest. Neither
+    /// player request carries a token, as yt-dlp sends none for either client.
+    async fn ciphered_streams(
+        &self,
+        video_id: &str,
+        client: Client,
+        choice: Choice,
+    ) -> Result<(Ciphered, Arc<crate::deobf::Solver>)> {
         let solver = self.solver().await?;
-        let response = self.signed_player(video_id, token, &solver, true).await?;
-        let mut audio: Vec<Ciphered> = playable(&response, video_id)?
+        log::debug!(
+            "player: asking {} for {video_id}, player {} sts {}",
+            client.name(),
+            solver.id(),
+            solver.sts()
+        );
+        let mut payload = json!({
+            "videoId": video_id,
+            "contentCheckOk": true,
+            "racyCheckOk": true,
+            "cpn": random_string(16),
+            "playbackContext": {
+                "contentPlaybackContext": {
+                    "html5Preference": "HTML5_PREF_WANTS",
+                    "signatureTimestamp": solver.sts(),
+                }
+            },
+        });
+        let mut visitor = None;
+        if client == Client::Embedded {
+            match self.embed_page(video_id).await {
+                Ok(page) => {
+                    payload["playbackContext"]["contentPlaybackContext"]["encryptedHostFlags"] =
+                        json!(page.flags);
+                    visitor = Some(page.visitor);
+                }
+                Err(error) => log::debug!("player: no host flags for {video_id}: {error:#}"),
+            }
+        }
+        let signed_in = client == Client::Music;
+        let response = self
+            .execute_visiting("player", client, payload, signed_in, visitor.as_deref())
+            .await?;
+        let audio: Vec<Ciphered> = playable(&response, video_id)?
             .iter()
             .filter_map(|format| ciphered(format, is_audio))
             .collect();
-        audio.sort_by_key(|format| std::cmp::Reverse(format.bitrate));
-        let chosen = match itag {
-            Some(itag) => audio
+        log::debug!(
+            "player: {} offers {video_id} as {}",
+            client.name(),
+            offered(audio.iter().map(|format| (format.itag, format.bitrate)))
+        );
+        let chosen = match choice {
+            Choice::Itag(itag) => audio
                 .into_iter()
                 .find(|format| format.itag == itag)
                 .with_context(|| format!("itag {itag} is no longer offered for {video_id}"))?,
-            None => prefer_aac(audio)
-                .with_context(|| format!("no addressable audio stream for {video_id}"))?,
+            Choice::Premium => {
+                let premium = audio
+                    .into_iter()
+                    .filter(|format| PREMIUM.contains(&format.itag))
+                    .collect();
+                choose(premium, None, |format| (&format.mime, format.bitrate))
+                    .with_context(|| format!("{} offers no premium stream", client.name()))?
+            }
+            Choice::Within(ceiling) => {
+                choose(audio, ceiling, |format| (&format.mime, format.bitrate))
+                    .with_context(|| format!("no addressable audio stream for {video_id}"))?
+            }
         };
-        let url = decipher(&solver, &chosen).await?;
-        Ok(AudioFormat {
-            itag: chosen.itag,
-            url: with_pot(&url, token),
-            mime: chosen.mime,
-            codec: chosen.codec,
-            bitrate: chosen.bitrate,
-            duration: chosen.duration,
-            content_length: chosen.content_length,
-            loudness_db: chosen.loudness_db,
-            user_agent: Client::Music.user_agent(),
-        })
+        Ok((chosen, solver))
     }
 
     /// The signed-in client's `player` response for `video_id`, with `token` on the request.
@@ -297,7 +467,7 @@ impl YtMusic {
             Err(error) => error,
         };
         log::debug!("player: the guest video for {video_id} failed ({refused:#})");
-        let token = self.po_token().await;
+        let token = self.po_token(video_id).await;
         let formats = self
             .signed_videos(video_id, &token)
             .await
@@ -333,7 +503,7 @@ impl YtMusic {
     /// the same failure when the player no longer offers that itag.
     pub(crate) async fn renewed_video(&self, video_id: &str, itag: u32) -> Result<VideoFormat> {
         let binding = self
-            .session_binding()
+            .stream_binding(video_id)
             .await
             .context("no session binding to mint a token for")?;
         let token = self
@@ -364,7 +534,7 @@ impl YtMusic {
     }
 
     async fn signed_video(&self, video_id: &str) -> Result<Vec<VideoFormat>> {
-        let token = self.po_token().await;
+        let token = self.po_token(video_id).await;
         self.signed_videos(video_id, &token).await
     }
 
@@ -402,6 +572,35 @@ impl YtMusic {
         log::debug!("player: the stream visitor was refused, priming a fresh one");
         self.adopt_visitor(issued.clone()).await;
         self.guest_request(video_id, Some(&issued)).await
+    }
+
+    /// What the embed page of `video_id` hands its player. YouTube refuses an embedded player
+    /// request without the page's host flags as an unavailable video. The flags differ from page
+    /// to page and only hold for the visitor the page was served to, so every track reads its own
+    /// page, as yt-dlp does, and asks as that visitor.
+    async fn embed_page(&self, video_id: &str) -> Result<EmbedPage> {
+        let page = self
+            .http
+            .get(format!("https://www.youtube.com/embed/{video_id}?html5=1"))
+            .header("User-Agent", Client::Embedded.user_agent())
+            .header("Referer", crate::context::EMBED_URL)
+            .send()
+            .await
+            .context("cannot reach the embed page")?
+            .text()
+            .await
+            .context("cannot read the embed page")?;
+        let read = |field: &str| -> Result<String> {
+            regex_lite::Regex::new(&format!(r#""{field}"\s*:\s*"([^"]+)""#))?
+                .captures(&page)
+                .and_then(|found| found.get(1))
+                .map(|found| found.as_str().to_string())
+                .with_context(|| format!("the embed page carries no {field}"))
+        };
+        Ok(EmbedPage {
+            flags: read("encryptedHostFlags")?,
+            visitor: read("VISITOR_DATA")?,
+        })
     }
 
     async fn guest_request(&self, video_id: &str, guest: Option<&str>) -> Result<Value> {
@@ -492,6 +691,33 @@ struct Ciphered {
     loudness_db: Option<f32>,
     url: String,
     signature: Option<(String, String)>,
+}
+
+impl Ciphered {
+    /// The playable format once `url` is the deciphered url, fetched as `client` would.
+    fn into_format(self, url: String, client: Client) -> AudioFormat {
+        AudioFormat {
+            itag: self.itag,
+            url,
+            mime: self.mime,
+            codec: self.codec,
+            bitrate: self.bitrate,
+            duration: self.duration,
+            content_length: self.content_length,
+            loudness_db: self.loudness_db,
+            user_agent: client.user_agent(),
+        }
+    }
+}
+
+/// The signed-in client's playable format for `chosen`, deciphered and with `token` on its url.
+async fn signed(
+    chosen: Ciphered,
+    solver: &crate::deobf::Solver,
+    token: &str,
+) -> Result<AudioFormat> {
+    let url = decipher(solver, &chosen).await?;
+    Ok(chosen.into_format(with_pot(&url, token), Client::Music))
 }
 
 /// Reads a format that has to be deciphered before it plays, if `wanted` accepts its mime type.
@@ -612,17 +838,6 @@ fn set_params(url: &mut reqwest::Url, changes: &[(&str, &str)]) {
     query.finish();
 }
 
-fn prefer_aac(formats: Vec<Ciphered>) -> Option<Ciphered> {
-    let aac = formats
-        .iter()
-        .position(|format| format.mime.starts_with("audio/mp4"));
-    let mut formats = formats;
-    match aac {
-        Some(at) => Some(formats.swap_remove(at)),
-        None => formats.into_iter().next(),
-    }
-}
-
 fn playable<'a>(response: &'a Value, video_id: &str) -> Result<&'a Vec<Value>> {
     let playability = playability(response);
     if !playability.ok() {
@@ -662,13 +877,31 @@ fn describe(format: &AudioFormat, bytes: usize) -> String {
     )
 }
 
-fn pick(formats: Vec<AudioFormat>) -> Option<AudioFormat> {
+/// The stream to play out of `formats`, read through `key` as its mime type and bitrate. AAC
+/// wins over every other codec when there is any. Among the candidates it takes the highest
+/// bitrate at or below `ceiling`, or the lowest of them when all are above it, and simply the
+/// highest when there is no ceiling.
+fn choose<T>(formats: Vec<T>, ceiling: Option<u32>, key: impl Fn(&T) -> (&str, u32)) -> Option<T> {
     let aac = formats
         .iter()
-        .filter(|format| format.mime.starts_with("audio/mp4"))
-        .max_by_key(|format| format.bitrate)
-        .cloned();
-    aac.or_else(|| formats.into_iter().max_by_key(|format| format.bitrate))
+        .any(|format| key(format).0.starts_with("audio/mp4"));
+    let candidates = formats
+        .into_iter()
+        .filter(|format| !aac || key(format).0.starts_with("audio/mp4"));
+    let (within, above): (Vec<T>, Vec<T>) =
+        candidates.partition(|format| ceiling.is_none_or(|ceiling| key(format).1 <= ceiling));
+    match within.is_empty() {
+        true => above.into_iter().min_by_key(|format| key(format).1),
+        false => within.into_iter().max_by_key(|format| key(format).1),
+    }
+}
+
+/// The streams a player answer offered, as `itag@kbps` pairs for a log line.
+fn offered(formats: impl Iterator<Item = (u32, u32)>) -> String {
+    formats
+        .map(|(itag, bitrate)| format!("{itag}@{}", bitrate / 1000))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn playability(response: &Value) -> Playability {
@@ -882,7 +1115,12 @@ mod tests {
                 user_agent: "",
             },
         ];
-        assert_eq!(pick(formats).unwrap().itag, 140);
+        assert_eq!(
+            choose(formats, None, |format| (&format.mime, format.bitrate))
+                .unwrap()
+                .itag,
+            140
+        );
     }
 
     /// The guest `player` response recorded by `record_player_fixture`.

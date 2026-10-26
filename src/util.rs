@@ -1,6 +1,9 @@
 use std::time::Duration;
 
 pub fn parse_clock(text: &str) -> Option<Duration> {
+    if !text.contains(':') {
+        return None;
+    }
     let mut seconds: u64 = 0;
     for part in text.split(':') {
         let value: u64 = part.trim().parse().ok()?;

@@ -4,8 +4,9 @@
 //! saying so, but it answers a bounded `Range` request at full speed. So the body is asked for
 //! a mebibyte at a time, each read has a deadline, and a range that stalls or breaks is asked
 //! for again from the byte it stopped at. A url the host refuses partway through, which is what
-//! a cold start token gets after its first megabyte or so, is renewed with a minted token and
-//! read on from the same byte.
+//! a cold start token gets after its first megabyte or so, is renewed through the client that
+//! handed it out, with a minted token when that client needs one, and read on from the same
+//! byte.
 
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -14,6 +15,7 @@ use anyhow::{Context as _, Result, bail};
 use bytes::Bytes;
 
 use crate::client::YtMusic;
+use crate::context::Client;
 use crate::models::AudioFormat;
 
 /// How much one request asks for.
@@ -54,6 +56,8 @@ struct Renewal {
     video_id: String,
     itag: u32,
     kind: Kind,
+    /// The client that handed out the url.
+    from: Client,
     /// The byte the last renewal was made at. A renewed url refused at that same byte ends the
     /// stream instead of renewing forever.
     at: Option<u64>,
@@ -96,13 +100,21 @@ impl AudioStream {
     }
 
     /// Lets the stream renew its url through `client` when the host refuses it partway through.
-    pub(crate) fn renewing(self, client: &Arc<YtMusic>, video_id: &str, itag: u32) -> Self {
-        self.renewing_kind(client, video_id, itag, Kind::Audio)
+    /// `from` is the client that handed the url out, which decides how a new one is asked for.
+    pub(crate) fn renewing(
+        self,
+        client: &Arc<YtMusic>,
+        video_id: &str,
+        itag: u32,
+        from: Client,
+    ) -> Self {
+        self.renewing_kind(client, video_id, itag, Kind::Audio, from)
     }
 
-    /// Like [`renewing`](Self::renewing), for the video-only stream `itag`.
+    /// Like [`renewing`](Self::renewing), for the video-only stream `itag`, which only the
+    /// signed-in client renews.
     pub(crate) fn renewing_video(self, client: &Arc<YtMusic>, video_id: &str, itag: u32) -> Self {
-        self.renewing_kind(client, video_id, itag, Kind::Video)
+        self.renewing_kind(client, video_id, itag, Kind::Video, Client::Music)
     }
 
     fn renewing_kind(
@@ -111,12 +123,14 @@ impl AudioStream {
         video_id: &str,
         itag: u32,
         kind: Kind,
+        from: Client,
     ) -> Self {
         self.renewal = Some(Renewal {
             client: Arc::downgrade(client),
             video_id: video_id.to_string(),
             itag,
             kind,
+            from,
             at: None,
         });
         self
@@ -140,6 +154,7 @@ impl AudioStream {
                 video_id: renewal.video_id.clone(),
                 itag: renewal.itag,
                 kind: renewal.kind,
+                from: renewal.from,
                 at: None,
             }),
         }
@@ -228,7 +243,7 @@ impl AudioStream {
         );
         let (url, agent, length) = match renewal.kind {
             Kind::Audio => client
-                .renewed_audio(&renewal.video_id, renewal.itag)
+                .renewed_audio(&renewal.video_id, renewal.itag, renewal.from)
                 .await
                 .map(|format| (format.url, format.user_agent, format.content_length)),
             Kind::Video => client

@@ -1,6 +1,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, MutexGuard},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result, bail};
@@ -16,6 +17,14 @@ const MUSIC_API_BASE: &str = "https://music.youtube.com/youtubei/v1/";
 const VISITOR_URL: &str = "https://www.youtube.com/sw.js_data";
 /// Where the signed-in account's data sync id is published.
 const HOME_URL: &str = "https://www.youtube.com/";
+/// The page whose player configuration says what a `WEB_REMIX` stream token is bound to.
+const MUSIC_URL: &str = "https://music.youtube.com/";
+/// The experiment that binds a stream token to the video instead of the session.
+const CONTENT_BINDING: &str = "html5_generate_content_po_token";
+/// How long a reading of the experiment flags is trusted before the page is read again.
+const FLAGS_KEEP: Duration = Duration::from_secs(60 * 60);
+/// How long a failed reading of the flags stands before the page is tried again.
+const FLAGS_RETRY: Duration = Duration::from_secs(60);
 /// The url a pasted cookie is stored against. A `youtube.com` domain cookie stored here
 /// also matches `www.youtube.com`.
 const COOKIE_ORIGIN: &str = "https://music.youtube.com/";
@@ -45,8 +54,20 @@ pub struct YtMusic {
     /// The account's data sync id, once it has been looked for. The inner `None` records a
     /// look that found nothing, so a signed-in run asks Google for it exactly once.
     data_sync: RwLock<Option<Option<String>>>,
+    /// The last reading of the YouTube Music page's experiment flags.
+    flags: RwLock<Option<Flags>>,
     hl: String,
     gl: String,
+}
+
+/// Whether the YouTube Music page binds stream tokens to the video, as read at `at`. A failed
+/// read counts as unbound, which is how yt-dlp treats a page it could not get, and is retried
+/// sooner.
+#[derive(Clone, Copy)]
+struct Flags {
+    content_bound: bool,
+    read: bool,
+    at: Instant,
 }
 
 /// The cookies of a signed-in account, the http client that sends them and stores the
@@ -89,6 +110,7 @@ impl YtMusic {
             resolve_cache: crate::dedup::ResolveCache::memory(),
             po_tokens: crate::potoken::PoTokens::default(),
             data_sync: RwLock::new(None),
+            flags: RwLock::new(None),
             hl: "en".to_string(),
             gl: "US".to_string(),
         }
@@ -351,6 +373,52 @@ impl YtMusic {
         }
     }
 
+    /// What the stream token for `video_id` is bound to. While the YouTube Music page has the
+    /// content binding experiment on, that is the video id. Otherwise it is the session, as
+    /// [`session_binding`](Self::session_binding) works it out.
+    pub(crate) async fn stream_binding(&self, video_id: &str) -> Option<String> {
+        match self.content_bound().await {
+            true => Some(video_id.to_string()),
+            false => self.session_binding().await,
+        }
+    }
+
+    /// Whether the YouTube Music page has the content binding experiment on. The page is read
+    /// at most once an hour, and a minute after a read that failed.
+    async fn content_bound(&self) -> bool {
+        if let Some(flags) = *self.flags.read().await
+            && flags.fresh()
+        {
+            return flags.content_bound;
+        }
+        let mut slot = self.flags.write().await;
+        if let Some(flags) = *slot
+            && flags.fresh()
+        {
+            return flags.content_bound;
+        }
+        let flags = match fetch_content_bound(self).await {
+            Ok(content_bound) => {
+                log::debug!("potoken: stream tokens are bound to the video: {content_bound}");
+                Flags {
+                    content_bound,
+                    read: true,
+                    at: Instant::now(),
+                }
+            }
+            Err(error) => {
+                log::warn!("ytmusic: cannot read the music page's experiment flags: {error:#}");
+                Flags {
+                    content_bound: false,
+                    read: false,
+                    at: Instant::now(),
+                }
+            }
+        };
+        *slot = Some(flags);
+        flags.content_bound
+    }
+
     /// The account's data sync id, read once out of the signed-in home page and kept for the
     /// life of the client. It changes only when the account does, and a client signs in once.
     async fn data_sync_id(&self) -> Option<String> {
@@ -424,6 +492,56 @@ async fn fetch_data_sync_id(api: &YtMusic) -> Result<String> {
         .and_then(|found| found.get(1))
         .map(|found| found.as_str().to_string())
         .context("the home page carries no data sync id")
+}
+
+/// Reads the content binding experiment off the YouTube Music page. The page is fetched signed
+/// in when the session is, since an experiment can be on for one account and off for another.
+async fn fetch_content_bound(api: &YtMusic) -> Result<bool> {
+    let http = api.authed.as_ref().map_or(&api.http, |authed| &authed.http);
+    let body = http
+        .get(MUSIC_URL)
+        .header("User-Agent", Client::Music.user_agent())
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+        .await
+        .context("cannot reach the music page")?
+        .text()
+        .await
+        .context("cannot read the music page")?;
+    content_bound(&body)
+}
+
+/// Whether a player configuration on `page` turns the content binding experiment on. This is
+/// yt-dlp's test: the last value of the flag in each `WEB_PLAYER_CONTEXT_CONFIGS` entry, and
+/// `true` in any of them.
+fn content_bound(page: &str) -> Result<bool> {
+    let (_, configs) = page
+        .split_once(r#""WEB_PLAYER_CONTEXT_CONFIGS""#)
+        .context("the page carries no player configuration")?;
+    let serialized =
+        regex_lite::Regex::new(r#""serializedExperimentFlags"\s*:\s*"((?:[^"\\]|\\.)*)""#)?;
+    let bound = serialized.captures_iter(configs).any(|found| {
+        let Ok(flags) = serde_json::from_str::<String>(&format!("\"{}\"", &found[1])) else {
+            return false;
+        };
+        flags
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .rfind(|(name, _)| *name == CONTENT_BINDING)
+            .is_some_and(|(_, value)| value == "true")
+    });
+    Ok(bound)
+}
+
+impl Flags {
+    /// Whether this reading still stands: an hour for one that worked, a minute for a failure.
+    fn fresh(&self) -> bool {
+        let keep = match self.read {
+            true => FLAGS_KEEP,
+            false => FLAGS_RETRY,
+        };
+        self.at.elapsed() < keep
+    }
 }
 
 impl Authed {

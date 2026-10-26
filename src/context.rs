@@ -2,6 +2,8 @@ use rand::Rng as _;
 use serde_json::{Value, json};
 
 const ID_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+/// The page the embedded client claims to be embedded on.
+pub(crate) const EMBED_URL: &str = "https://www.reddit.com/";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Client {
@@ -9,6 +11,9 @@ pub enum Client {
     Web,
     Tv,
     VisionOs,
+    /// The player embedded on other sites. YouTube serves it streams without a proof-of-origin
+    /// token, so it is the fallback for a track the guest client refuses.
+    Embedded,
 }
 
 impl Client {
@@ -18,6 +23,7 @@ impl Client {
             Self::Web => "WEB",
             Self::Tv => "TVHTML5",
             Self::VisionOs => "VISIONOS",
+            Self::Embedded => "WEB_EMBEDDED_PLAYER",
         }
     }
 
@@ -27,6 +33,7 @@ impl Client {
             Self::Web => "2.20260707.00.00",
             Self::Tv => "7.20260707.07.00",
             Self::VisionOs => "1.02",
+            Self::Embedded => "2.20260708.00.00",
         }
     }
 
@@ -36,12 +43,13 @@ impl Client {
             Self::Web => 1,
             Self::Tv => 7,
             Self::VisionOs => 101,
+            Self::Embedded => 56,
         }
     }
 
     pub fn user_agent(self) -> &'static str {
         match self {
-            Self::Music | Self::Web => {
+            Self::Music | Self::Web | Self::Embedded => {
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
             }
             Self::Tv => "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
@@ -62,7 +70,7 @@ impl Client {
             "utcOffsetMinutes": 0,
         });
         let extra = match self {
-            Self::Music | Self::Web => json!({
+            Self::Music | Self::Web | Self::Embedded => json!({
                 "osName": "Windows",
                 "osVersion": "10.0",
                 "platform": "DESKTOP",
@@ -70,7 +78,7 @@ impl Client {
                 "browserName": "Chrome",
                 "browserVersion": "125.0.0.0",
                 "originalUrl": match self {
-                    Self::Web => "https://www.youtube.com",
+                    Self::Web | Self::Embedded => "https://www.youtube.com",
                     _ => "https://music.youtube.com",
                 },
             }),
@@ -91,11 +99,17 @@ impl Client {
         {
             map.remove("visitorData");
         }
-        json!({
+        let mut context = json!({
             "client": client,
             "user": { "enableSafetyMode": false, "lockedSafetyMode": false },
             "request": { "useSsl": true, "internalExperimentFlags": [] },
-        })
+        });
+        // The embedded player names the site it is embedded on. yt-dlp sends any site that is
+        // not YouTube's own.
+        if self == Self::Embedded {
+            context["thirdParty"] = json!({ "embedUrl": EMBED_URL });
+        }
+        context
     }
 }
 

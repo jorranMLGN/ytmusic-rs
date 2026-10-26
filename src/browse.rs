@@ -152,6 +152,12 @@ impl YtMusic {
                 }
             }
         }
+        let own = ArtistRef {
+            name: name.clone(),
+            id: Some(browse_id.to_string()),
+        };
+        credit(&mut albums, &own);
+        credit(&mut singles, &own);
         Ok(Artist {
             browse_id: browse_id.to_string(),
             name,
@@ -162,6 +168,50 @@ impl YtMusic {
             albums,
             singles,
         })
+    }
+
+    /// Every release on an artist's discography page, newest first. The artist page carousels
+    /// stop at ten albums and ten singles, so this is the only way to the full list. Pages past
+    /// the first are fetched until the grid runs out or `MAX_PAGES` is reached.
+    pub async fn discography(&self, channel_id: &str) -> Result<Vec<Album>> {
+        let mut response = self
+            .execute(
+                "browse",
+                Client::Music,
+                json!({ "browseId": format!("MPAD{channel_id}") }),
+            )
+            .await?;
+        let own = ArtistRef {
+            name: parse::find_renderer(&response, "musicHeaderRenderer")
+                .and_then(|header| header.run_text(&["title"]))
+                .unwrap_or_default(),
+            id: Some(channel_id.to_string()),
+        };
+        let mut albums = Vec::new();
+        let mut pages = 0;
+        loop {
+            let grids = parse::find_renderers(&response, "gridRenderer")
+                .into_iter()
+                .chain(parse::find_renderers(&response, "gridContinuation"));
+            let mut token = None;
+            for grid in grids {
+                albums.extend(
+                    grid.items(&["items"])
+                        .iter()
+                        .filter_map(parse::two_row_album),
+                );
+                token = token.or_else(|| parse::shelf_continuation(grid));
+            }
+            pages += 1;
+            let Some(token) = token.filter(|_| pages < MAX_PAGES) else {
+                break;
+            };
+            response = self
+                .execute("browse", Client::Music, json!({ "continuation": token }))
+                .await?;
+        }
+        credit(&mut albums, &own);
+        Ok(albums)
     }
 
     pub async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetail> {
@@ -314,4 +364,15 @@ fn privacy_of(response: &Value) -> Option<String> {
     found
         .into_iter()
         .find_map(|value| value.as_str().map(str::to_string))
+}
+
+/// Names `artist` on every release that lists no one. An artist's own page leaves the artist
+/// out of each release's subtitle, so without this those releases would credit nobody.
+fn credit(albums: &mut [Album], artist: &ArtistRef) {
+    if artist.name.is_empty() {
+        return;
+    }
+    for album in albums.iter_mut().filter(|album| album.artists.is_empty()) {
+        album.artists.push(artist.clone());
+    }
 }
