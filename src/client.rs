@@ -14,6 +14,9 @@ use crate::context::Client;
 
 const API_BASE: &str = "https://www.youtube.com/youtubei/v1/";
 const MUSIC_API_BASE: &str = "https://music.youtube.com/youtubei/v1/";
+/// Where YouTube Music uploads a playlist's own picture before `edit_playlist` attaches it.
+const THUMBNAIL_UPLOAD: &str =
+    "https://music.youtube.com/playlist_image_upload/playlist_custom_thumbnail";
 const VISITOR_URL: &str = "https://www.youtube.com/sw.js_data";
 /// Where the signed-in account's data sync id is published.
 const HOME_URL: &str = "https://www.youtube.com/";
@@ -267,6 +270,94 @@ impl YtMusic {
             bail!("{endpoint} failed with status {status}");
         }
         Ok(value)
+    }
+
+    /// Uploads `image` as a playlist thumbnail through Google's resumable upload protocol and
+    /// answers the encrypted blob id `edit_playlist` attaches. Only a signed-in client can.
+    pub(crate) async fn upload_playlist_image(&self, image: Vec<u8>) -> Result<String> {
+        let authed = self
+            .authed
+            .as_ref()
+            .context("uploading a thumbnail needs a signed-in account")?;
+        let origin = "https://music.youtube.com";
+        let signed = |request: reqwest::RequestBuilder| -> Result<reqwest::RequestBuilder> {
+            let authorization = authed
+                .authorization(origin)
+                .context("cookies have no SAPISID")?;
+            let mut request = request
+                .header("Origin", origin)
+                .header("X-Origin", origin)
+                .header("Referer", MUSIC_URL)
+                .header("User-Agent", Client::Music.user_agent())
+                .header("X-Youtube-Client-Name", Client::Music.id().to_string())
+                .header("X-Youtube-Client-Version", Client::Music.version())
+                .header("Authorization", authorization)
+                .header("X-Goog-AuthUser", self.authuser.to_string());
+            if let Some(page) = &self.page_id {
+                request = request.header("X-Goog-PageId", page);
+            }
+            Ok(request)
+        };
+
+        let started = signed(authed.http.post(THUMBNAIL_UPLOAD))?
+            .header(
+                "Content-Type",
+                "application/x-www-form-urlencoded;charset=utf-8",
+            )
+            .header("Content-Length", "0")
+            .header("X-Goog-Upload-Command", "start")
+            .header("X-Goog-Upload-Protocol", "resumable")
+            .header(
+                "X-Goog-Upload-Header-Content-Length",
+                image.len().to_string(),
+            )
+            .send()
+            .await
+            .context("cannot start the thumbnail upload")?;
+        let status = started.status();
+        if !status.is_success() {
+            bail!("starting the thumbnail upload failed with status {status}");
+        }
+        let target = match started.headers().get("X-Goog-Upload-URL") {
+            Some(url) => url
+                .to_str()
+                .context("the upload url is not text")?
+                .to_owned(),
+            None => {
+                let id = started
+                    .headers()
+                    .get("X-GUploader-UploadID")
+                    .context("the upload names no target")?
+                    .to_str()
+                    .context("the upload id is not text")?;
+                format!("{THUMBNAIL_UPLOAD}?upload_id={id}&upload_protocol=resumable")
+            }
+        };
+
+        let sent = signed(authed.http.post(&target))?
+            .header("X-Goog-Upload-Command", "upload, finalize")
+            .header("X-Goog-Upload-Offset", "0")
+            .body(image)
+            .send()
+            .await
+            .context("cannot send the thumbnail")?;
+        let status = sent.status();
+        if sent.headers().contains_key(SET_COOKIE) {
+            authed.save();
+        }
+        let body = sent
+            .bytes()
+            .await
+            .context("cannot read the thumbnail upload response")?;
+        if !status.is_success() {
+            bail!("the thumbnail upload failed with status {status}");
+        }
+        let reply: Value =
+            serde_json::from_slice(&body).context("the thumbnail upload answered no json")?;
+        reply["encryptedBlobId"]
+            .as_str()
+            .map(str::to_owned)
+            .context("the thumbnail upload answered no blob id")
     }
 
     /// Asks Google to rotate the session's timestamp cookies and saves the store. A browser tab
@@ -565,14 +656,15 @@ impl Authed {
         ))
     }
 
-    /// Writes the store to its file, if one is set. On failure the error is logged and the
-    /// cookies stay in memory.
+    /// Serializes and replaces the cookie file under one lock so older snapshots cannot finish last.
+    /// Failures are logged and leave the cookies in memory.
     fn save(&self) {
         let Some(path) = &self.file else {
             return;
         };
+        let store = self.store();
         let mut body = Vec::new();
-        if let Err(error) = cookie_store::serde::json::save(&self.store(), &mut body) {
+        if let Err(error) = cookie_store::serde::json::save(&store, &mut body) {
             log::warn!("ytmusic: cannot encode the cookies: {error}");
             return;
         }
@@ -634,24 +726,30 @@ fn load(path: &Path) -> Option<CookieStore> {
     }
 }
 
-/// Replaces `path` with a file readable by its owner only, through a temp file and a
-/// rename.
+/// Replaces `path` through a unique temporary file that is synced before the rename.
+/// Temporary files are readable only by their owner on Unix and are removed on failure.
 fn write_private(path: &Path, body: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).context("cannot create the cookie dir")?;
-    }
-    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
-    std::fs::write(&temp, body).with_context(|| format!("cannot write {}", temp.display()))?;
+    use std::io::Write as _;
+
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent).context("cannot create the cookie dir")?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(".cookies-")
+        .tempfile_in(parent)
+        .context("cannot create a temporary cookie file")?;
+    temp.write_all(body).context("cannot write the cookies")?;
+    temp.as_file()
+        .sync_all()
+        .context("cannot sync the cookies")?;
+    temp.persist(path)
+        .with_context(|| format!("cannot replace {}", path.display()))?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("cannot restrict {}", temp.display()))?;
-    }
-    if let Err(error) = std::fs::rename(&temp, path) {
-        let _ = std::fs::remove_file(&temp);
-        return Err(error).with_context(|| format!("cannot replace {}", path.display()));
-    }
+    std::fs::File::open(parent)
+        .and_then(|folder| folder.sync_all())
+        .context("cannot sync the cookie dir")?;
     Ok(())
 }
 

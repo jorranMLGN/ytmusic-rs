@@ -11,7 +11,7 @@ use crate::nav::Nav as _;
 use crate::parse;
 use crate::util::parse_year;
 
-const MAX_PAGES: usize = 50;
+pub(crate) const MAX_PAGES: usize = 50;
 
 impl YtMusic {
     pub async fn album(&self, browse_id: &str) -> Result<AlbumDetail> {
@@ -128,7 +128,9 @@ impl YtMusic {
                     .and_then(|button| button.run_text(&["subscriberCountText"]))
             });
         let mut top_tracks = Vec::new();
+        let mut songs = None;
         if let Some(shelf) = parse::find_renderer(&response, "musicShelfRenderer") {
+            songs = songs_playlist(shelf);
             for item in shelf.items(&["contents"]) {
                 if let Some(track) = parse::list_item_track(item) {
                     top_tracks.push(track);
@@ -165,6 +167,7 @@ impl YtMusic {
             subscribers,
             thumbnails: parse::thumbnails(header),
             top_tracks,
+            songs,
             albums,
             singles,
         })
@@ -375,4 +378,16 @@ fn credit(albums: &mut [Album], artist: &ArtistRef) {
     for album in albums.iter_mut().filter(|album| album.artists.is_empty()) {
         album.artists.push(artist.clone());
     }
+}
+
+/// Reads the top songs playlist from the shelf title or show-all button.
+/// Browse destinations without the playlist prefix are ignored.
+fn songs_playlist(shelf: &Value) -> Option<String> {
+    let endpoint = shelf
+        .runs(&["title"])
+        .iter()
+        .find_map(|run| run.at(&["navigationEndpoint", "browseEndpoint"]))
+        .or_else(|| shelf.at(&["bottomEndpoint", "browseEndpoint"]))?;
+    let browse_id = endpoint.str_at(&["browseId"])?;
+    Some(browse_id.strip_prefix("VL")?.to_string())
 }
